@@ -925,3 +925,4 @@ lightning_logs
 !poetry.toml
 !example.toml
 !pyproject.toml
+!targets.toml

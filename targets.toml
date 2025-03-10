@@ -1,0 +1,13 @@
+[outcomes]
+labels = ['in_hosp_death', 'ext_stay_7', 'non_home_discharge', 'icu_admission'],
+display = ['In-hospital death', 'Extended stay (>7 days)', 'Non-home discharge', 'ICU admission']
+
+[attributes]
+labels = ['gender', 'race_group', 'marital_status', 'insurance']
+display = ['Sex', 'Ethnicity', 'Marital Status', 'Insurance']
+nonnormal = ['Age', '# historical discharge notes', '# Raw Input Tokens', '# Processed Input Tokens']
+categorical = []
+
+[age]
+bins = [18, 49, 59, 69, 79, 91]
+labels = ['<50', '50-59', '60-69', '70-79', '80+'] 
