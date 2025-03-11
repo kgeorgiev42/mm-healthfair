@@ -115,6 +115,19 @@ if __name__ == "__main__":
                                      verbose=args.verbose)
     admits_last = get_final_episodes(admits_icu)
 
+     ### Optional random sampling to understample subjects
+    # sample n subjects (can be used to test/speed up processing)
+    if args.sample is not None:
+        if args.verbose:
+            print(
+                f"SELECTING RANDOM SAMPLE OF {args.sample} PATIENTS WITH ED ATTENDANCE."
+            )
+        # set the seed for reproducibility
+        rng = np.random.default_rng(0)
+        if isinstance(admits_last, pl.LazyFrame):
+            admits_last = admits_last.collect()
+        admits_last = admits_last.sample(n=args.sample, seed=0)
+
     # Process long-term conditions
     diagnoses = m4c.read_diagnoses_table(mimic4_path, admits_icu, admits_last, use_lazy=args.lazy, 
                                          verbose=args.verbose)
@@ -133,22 +146,6 @@ if __name__ == "__main__":
         print("Printing characteristics in full patient sample.")
         get_demographics_summary(admits_last)
         print("------------------------------------------")
-    
-    ### Optional random sampling to understample subjects
-    # sample n subjects (can be used to test/speed up processing)
-    if args.sample is not None:
-        if args.verbose:
-            print(
-                f"SELECTING RANDOM SAMPLE OF {args.sample} 'PATIENTS WITH ED ATTENDANCE'."
-            )
-        # set the seed for reproducibility
-        rng = np.random.default_rng(0)
-        admits_last = admits_last.sample(n=args.sample, seed=0)
-        if args.verbose:
-            print("------------------------------------------")
-            print("Printing characteristics in random sample.")
-            get_demographics_summary(admits_last)
-            print("------------------------------------------")
 
     if args.include_notes:
         notes = m4c.read_notes(admits_icu, admits_last, mimic4_note_path, 
