@@ -129,18 +129,19 @@ def read_icd_mapping(map_path: str) -> pl.DataFrame:
     mapping = mapping.with_columns(pl.col("diagnosis_description").str.to_lowercase())
     return mapping
 
-def contains_both_ltc_types(ltc_set: pl.Series) -> bool:
+def contains_both_ltc_types(ltc_set: set) -> bool:
     """
     Helper util function for physical-mental multimorbidity detection.
 
     Args:
-        ltc_set (pl.Series): Series containing LTC codes.
+        ltc_set (set): Set containing LTC codes.
 
     Returns:
         bool: True if both physical and mental LTC types are present, False otherwise.
     """
-    physltc_present = ltc_set.str.starts_with("physltc_").any()
-    menltc_present = ltc_set.str.starts_with("menltc_").any()
+    ltc_series = pl.Series(list(ltc_set))
+    physltc_present = ltc_series.str.starts_with("physltc_").any()
+    menltc_present = ltc_series.str.starts_with("menltc_").any()
     return physltc_present and menltc_present
 
 def preview_data(filepath: str) -> None:
@@ -153,7 +154,7 @@ def preview_data(filepath: str) -> None:
     example_id = list(data_dict.keys())[-1]
     print(f"Example data:{data_dict[example_id]}")
 
-def get_demographics_summary(ed_pts: pl.DataFrame) -> None:
+def get_demographics_summary(ed_pts: pl.DataFrame | pl.LazyFrame) -> None:
     """
     Summarises sensitive attributes and outcome prevalence.
     Args:
@@ -162,6 +163,9 @@ def get_demographics_summary(ed_pts: pl.DataFrame) -> None:
     Returns:
         pl.DataFrame: Summary table.
     """
+    if isinstance(ed_pts, pl.LazyFrame):
+        ed_pts = ed_pts.collect().to_pandas()
+        
     print('Demographics summary')
     print('Unique patients:', ed_pts.subject_id.nunique())
     print('Age distribution:', ed_pts.anchor_age.describe())

@@ -28,6 +28,9 @@ spacy = "3.7.5"
 torch = {version = "^2.5.1", source = "pytorch-gpu"}
 torchvision = {version = "^0.20.1", source = "pytorch-gpu"}
 lightning = "^2.5.0.post0"
+tableone = "^0.9.1"
+pyarrow = "^19.0.1"
+pandas = "^2.2.3"
 
 [tool.poetry.group.dev.dependencies]
 deptry = "^0.16.1"

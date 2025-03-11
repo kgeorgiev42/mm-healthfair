@@ -1,10 +1,11 @@
 import numpy as np
 import polars as pl
+import pandas as pd
 import spacy
 import json
 from tqdm import tqdm
 from transformers import AutoModel, AutoTokenizer
-from functions import read_icd_mapping, contains_both_ltc_types, rename_fields
+from utils.functions import read_icd_mapping, contains_both_ltc_types, rename_fields
 
 ###############################
 # Static data preprocessing
@@ -31,7 +32,7 @@ def preproc_icd_module(diagnoses: pl.DataFrame | pl.LazyFrame,
                 icd = icd[:3]
             try:
                 # Many ICD-9's do not have a 1-to-1 mapping; get first index of mapped codes
-                return mapping.loc[mapping[map_code_colname] == icd].icd10cm.iloc[0]
+                return mapping.filter(pl.col(map_code_colname) == icd).select('icd10cm').to_series()[0]
             except:
                 #print("Error on code", icd)
                 return np.nan
@@ -39,44 +40,55 @@ def preproc_icd_module(diagnoses: pl.DataFrame | pl.LazyFrame,
         # Create new column with original codes as default
         col_name = 'icd10_convert'
         if root: col_name = 'root_' + col_name
-        df[col_name] = df['icd_code'].values
+        df = df.with_columns(pl.col('icd_code').alias(col_name).cast(pl.Utf8))
 
-        # Group identical ICD9 codes, then convert all ICD9 codes within a group to ICD10
-        for code, group in tqdm(df.loc[df.icd_version == 9].groupby(by='icd_code')):
-            new_code = icd_9to10(code)
-            for idx in group.index.values:
-                # Modify values of original df at the indexes in the groups
-                df.at[idx, col_name] = new_code
+        # Convert ICD9 codes to ICD10 in a vectorized manner
+        icd9_codes = df.filter(pl.col('icd_version') == 9).select('icd_code').unique().to_series().to_list()
+        icd9_to_icd10_map = {code: icd_9to10(code) for code in icd9_codes}
+        
+        df = df.with_columns(
+            pl.when(pl.col('icd_version') == 9)
+            .then(pl.col('icd_code').apply(lambda x: icd9_to_icd10_map.get(x, np.nan), return_dtype=pl.Utf8))
+            .otherwise(pl.col(col_name))
+            .alias(col_name)
+        )
 
         if only_icd10:
             # Column for just the roots of the converted ICD10 column
-            df['root'] = df[col_name].apply(lambda x: x[:3] if type(x) is str else np.nan)
+            df = df.with_columns(pl.col(col_name).apply(lambda x: x[:3] if isinstance(x, str) else np.nan, return_dtype=pl.Utf8).alias('root'))
+
+        return df
 
     # Optional ICD mapping if argument passed
     if icd_map_path:
         icd_map = read_icd_mapping(icd_map_path)
-        standardize_icd(icd_map, diagnoses, root=True)
-        diagnoses = diagnoses[diagnoses['root_icd10_convert'].notnull()]
+        diagnoses = standardize_icd(icd_map, diagnoses, root=True)
+        diagnoses = diagnoses.filter(pl.col('root_icd10_convert').is_not_null())
         if verbose:
-            print("# unique ICD-9 codes",diagnoses[diagnoses['icd_version']==9]['icd_code'].nunique())
-            print("# unique ICD-10 codes",diagnoses[diagnoses['icd_version']==10]['icd_code'].nunique())
-            print("# unique ICD-10 codes (After converting ICD-9 to ICD-10)",diagnoses['root_icd10_convert'].nunique())
-            print("# unique ICD-10 codes (After clinical grouping ICD-10 codes)",diagnoses['root'].nunique())
-            print("# Unique patients:  ", diagnoses.hadm_id.nunique())
+            print("# unique ICD-9 codes", diagnoses.filter(pl.col('icd_version') == 9).select('icd_code').n_unique())
+            print("# unique ICD-10 codes", diagnoses.filter(pl.col('icd_version') == 10).select('icd_code').n_unique())
+            print("# unique ICD-10 codes (After converting ICD-9 to ICD-10)", diagnoses.select('root_icd10_convert').n_unique())
+            print("# unique ICD-10 codes (After clinical grouping ICD-10 codes)", diagnoses.select('root').n_unique())
+            print("# Unique patients:  ", diagnoses.select('hadm_id').n_unique())
 
-    diagnoses = diagnoses[['subject_id','hadm_id','seq_num','long_title','root_icd10_convert']]
+    diagnoses = diagnoses.select(['subject_id', 'hadm_id', 'seq_num', 'long_title', 'root_icd10_convert'])
     #### Create features for long-term chronic conditions
     if ltc_dict_path:
         with open(ltc_dict_path, 'r') as json_dict:
             ltc_dict = json.load(json_dict)
         ### Initialise long-term condition column
-        diagnoses['ltc_code'] = 'Undefined'
-        for ltc_code, icd_codes in ltc_dict.items():
-            diagnoses['ltc_code'] = np.where(
-                diagnoses['root_icd10_convert'].str.startswith(tuple(icd_codes)),
-                ltc_code,
-                diagnoses['ltc_code']
-            )
+        diagnoses = diagnoses.with_columns(pl.lit('Undefined').alias('ltc_code').cast(pl.Utf8))
+        print('Applying LTC coding to diagnoses...')
+        for ltc_group, codelist in tqdm(ltc_dict.items()):
+            #print("Group:", ltc_group, "Codes:", codelist)
+            for code in codelist:
+                diagnoses = diagnoses.with_columns(
+                    pl.when(pl.col('root_icd10_convert').str.starts_with(code))
+                    .then(pl.lit(ltc_group))
+                    .otherwise(pl.col('ltc_code'))
+                    .alias('ltc_code')
+                    .cast(pl.Utf8)
+                )
 
     return diagnoses.lazy() if use_lazy else diagnoses
 
@@ -110,16 +122,16 @@ def get_ltc_features(admits_last: pl.DataFrame | pl.LazyFrame,
 
     ### Create features for multimorbidity
     diag_flat = diag_flat.with_columns([
-        pl.col('ltc_code').apply(contains_both_ltc_types).alias('phys_men_multimorbidity'),
-        pl.col('ltc_code').apply(len).cast(pl.Int8).alias('n_unique_conditions'),
-        pl.when(pl.col('ltc_code').apply(len) > 1).then(1).otherwise(0).alias('is_multimorbid'),
-        pl.when(pl.col('ltc_code').apply(len) > 3).then(1).otherwise(0).alias('is_complex_multimorbid')
+        pl.col('ltc_code').apply(contains_both_ltc_types, return_dtype=pl.Int8).alias('phys_men_multimorbidity'),
+        pl.col('ltc_code').apply(len, return_dtype=pl.Int8).alias('n_unique_conditions'),
+        pl.when(pl.col('ltc_code').apply(len, return_dtype=pl.Int8) > 1).then(1).otherwise(0).alias('is_multimorbid'),
+        pl.when(pl.col('ltc_code').apply(len, return_dtype=pl.Int8) > 3).then(1).otherwise(0).alias('is_complex_multimorbid')
     ])
     
     ### Merge with base patient data
     admits_last = admits_last.join(diag_flat, on='subject_id', how='left')
     admits_last = admits_last.with_columns([
-        pl.col(col).fill_null(0).cast(pl.Int8) for col in diag_flat.drop(['subject_id', 'ltc_code']).columns
+        pl.col(col).cast(pl.Int8).fill_null(0) for col in diag_flat.drop(['subject_id', 'ltc_code']).columns
     ])
     
     return admits_last.lazy() if use_lazy else admits_last
@@ -183,77 +195,63 @@ def prepare_medication_features(medications: pl.DataFrame | pl.LazyFrame,
     if isinstance(admits_last, pl.LazyFrame):
         admits_last = admits_last.collect()
 
+    ### Convert to pandas for easier manipulation
+    medications = medications.to_pandas()
+    admits_last = admits_last.to_pandas()
+    
+    medications['charttime'] = pd.to_datetime(medications['charttime'])
+    medications['edregtime'] = pd.to_datetime(medications['edregtime'])
+    medications = medications[(medications['charttime']<medications['edregtime'])]
+
     ### Clean and prepare medication text
-    medications = medications.with_columns(
-        pl.col('medication').str.to_lowercase().str.strip().str.replace(' ', '_')
-    )
+    medications['medication'] = medications['medication'].str.lower().str.strip().str.replace(' ', '_').str.replace('-', '_')
     
     ### Get top_n (most commonly found) medications
-    top_meds = medications.select(pl.col('medication').value_counts()).head(top_n)['medication'].to_list()
+    top_meds = medications['medication'].value_counts().head(top_n).index.tolist()
     
     #### Filter most common medications
-    medications = medications.filter(pl.col('medication').is_in(top_meds))
+    medications = medications[medications['medication'].isin(top_meds)]
     
     ### Clean some of the top medication fields
-    medications = medications.with_columns([
-        pl.when(pl.col('medication').str.contains('vancomycin')).then('vancomycin').otherwise(pl.col('medication')).alias('medication'),
-        pl.when(pl.col('medication').str.contains('acetaminophen')).then('acetaminophen').otherwise(pl.col('medication')).alias('medication')
-    ])
-    
+    medications['medication'] = np.where(medications['medication'].str.contains('vancomycin'), 'vancomycin', medications['medication'])
+    medications['medication'] = np.where(medications['medication'].str.contains('acetaminophen'), 'acetaminophen', medications['medication'])
+    medications['medication'] = np.where(medications['medication'].str.contains('albuterol_0.083%_neb_soln'), 'albuterol_neb_soln', medications['medication'])
+    medications['medication'] = np.where(medications['medication'].str.contains('n_presc_oxycodone_(immediate_release)', regex=False), 'n_presc_oxycodone', medications['medication'])
     ### Get days since first and last medication
-    medications = medications.with_columns([
-        pl.col('charttime').cast(pl.Datetime),
-        pl.col('edregtime').cast(pl.Datetime)
-    ])
+    medications = medications.sort_values(['subject_id', 'medication', 'charttime'])
+    meds_min = medications.drop_duplicates(subset=['subject_id', 'medication'], keep='first')
+    meds_max = medications.drop_duplicates(subset=['subject_id', 'medication'], keep='last')
+    meds_min = meds_min.rename(columns={'charttime': 'first_date'})
+    meds_max = meds_max.rename(columns={'charttime': 'last_date'})
     
-    meds_min = medications.groupby(['subject_id', 'medication', 'edregtime']).agg(
-        pl.col('charttime').min().alias('first_date')
-    )
+    meds_min['dsf'] = (medications['edregtime'] - meds_min['first_date']).dt.days
+    meds_max['dsl'] = (medications['edregtime'] - meds_max['last_date']).dt.days
     
-    meds_max = medications.groupby(['subject_id', 'medication', 'edregtime']).agg(
-        pl.col('charttime').max().alias('last_date')
-    )
+    ### Get number of prescriptions
+    meds_ids = medications.groupby(['subject_id', 'medication', 'edregtime']).size().reset_index(name='n_presc')
     
-    meds_min = meds_min.with_columns(
-        (pl.col('edregtime') - pl.col('first_date')).dt.days().alias('dsf')
-    )
-    
-    meds_max = meds_max.with_columns(
-        (pl.col('edregtime') - pl.col('last_date')).dt.days().alias('dsl')
-    )
-    
-    meds_ids = medications.groupby(['subject_id', 'medication', 'edregtime']).agg(
-        pl.count().alias('n_presc')
-    )
-    
-    meds_ids = meds_ids.join(meds_min.select(['subject_id', 'medication', 'dsf']), on=['subject_id', 'medication'], how='left')
-    meds_ids = meds_ids.join(meds_max.select(['subject_id', 'medication', 'dsl']), on=['subject_id', 'medication'], how='left')
-    
+    meds_ids = meds_ids.merge(meds_min[['subject_id', 'medication', 'dsf']], on=['subject_id', 'medication'], how='left')
+    meds_ids = meds_ids.merge(meds_max[['subject_id', 'medication', 'dsl']], on=['subject_id', 'medication'], how='left')
+
     #### Pivot table and create drug-specific features
-    meds_piv = meds_ids.pivot(index='subject_id', columns='medication', values=['n_presc', 'dsf', 'dsl'])
-    meds_piv.columns = [rename_fields(col) for col in meds_piv.columns]
+    meds_piv = meds_ids.pivot_table(index='subject_id', columns='medication', values=['n_presc', 'dsf', 'dsl'], fill_value=0)
+    meds_piv.columns = [rename_fields('_'.join(col).strip()) for col in meds_piv.columns.values]
     
-    meds_piv_total = meds_ids.groupby('subject_id').agg(
-        pl.col('medication').n_unique().alias('total_n_presc')
-    )
+    meds_piv_total = meds_ids.groupby('subject_id')['medication'].nunique().reset_index(name='total_n_presc')
     
-    admits_last = admits_last.join(meds_piv_total, on='subject_id', how='left')
-    admits_last = admits_last.join(meds_piv, on='subject_id', how='left')
+    admits_last = admits_last.merge(meds_piv_total, on='subject_id', how='left')
+    admits_last = admits_last.merge(meds_piv, on='subject_id', how='left')
     
     ### Fill missing values
     days_cols = [col for col in admits_last.columns if 'dsf' in col or 'dsl' in col]
-    admits_last = admits_last.with_columns([
-        pl.col(col).fill_null(9999).cast(pl.Int16) for col in days_cols
-    ])
+    admits_last[days_cols] = admits_last[days_cols].fillna(9999).astype(np.int32)
     
     nums_cols = [col for col in admits_last.columns if 'n_presc' in col]
-    admits_last = admits_last.with_columns([
-        pl.col(col).fill_null(0).cast(pl.Int16) for col in nums_cols
-    ])
+    admits_last[nums_cols] = admits_last[nums_cols].fillna(0).astype(np.int16)
     
-    admits_last = admits_last.with_columns(
-        pl.col('total_n_presc').fill_null(0).cast(pl.Int8)
-    )
+    admits_last['total_n_presc'] = admits_last['total_n_presc'].fillna(0).astype(np.int8)
+    admits_last = pl.DataFrame(admits_last)
+
     return admits_last.lazy() if use_lazy else admits_last
     
 
@@ -343,7 +341,7 @@ def clean_labevents(labs_data: pl.LazyFrame) -> pl.LazyFrame:
     """
     labs_data = labs_data.with_columns(
         pl.col("label").str.to_lowercase().str.replace(" ", "_").str.replace(",", "").str.replace('"', "").str.replace(" ", "_"),
-        pl.col("charttime").str.replace("T", " ").str.strip_chars()
+        pl.col("charttime").cast(pl.Utf8).str.replace("T", " ").str.strip_chars()
     )
     lab_events = labs_data.with_columns(
             value=pl.when(pl.col("value") == ".").then(None).otherwise(pl.col("value"))
