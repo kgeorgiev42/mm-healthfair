@@ -35,19 +35,19 @@ if __name__ == "__main__":
         "-i",
         type=str,
         help="Text file containing list of ITEMIDs to use from labevents.",
-        default="../outputs/reference/lab_items.txt"
+        default="../config/lab_items.txt"
     )
     parser.add_argument(
         "--icd9_to_icd10",
         type=str,
         help="Text file containing ICD 9-10 mapping.",
-        default="../outputs/reference/icd9to10.txt"
+        default="../config/icd9to10.txt"
     )
     parser.add_argument(
         "--ltc_mapping",
         type=str,
         help="JSON file containing mapping for long-term conditions in ICD-10 format.",
-        default="../outputs/reference/ltc_mapping.json"
+        default="../config/ltc_mapping.json"
     )
     parser.add_argument(
         "--verbose",
@@ -129,8 +129,10 @@ if __name__ == "__main__":
                                    use_lazy=args.lazy)
     
     if args.verbose:
+        print("------------------------------------------")
         print("Printing characteristics in full patient sample.")
         get_demographics_summary(admits_last)
+        print("------------------------------------------")
     
     ### Optional random sampling to understample subjects
     # sample n subjects (can be used to test/speed up processing)
@@ -143,8 +145,10 @@ if __name__ == "__main__":
         rng = np.random.default_rng(0)
         admits_last = admits_last.sample(n=args.sample, seed=0)
         if args.verbose:
+            print("------------------------------------------")
             print("Printing characteristics in random sample.")
             get_demographics_summary(admits_last)
+            print("------------------------------------------")
 
     if args.include_notes:
         notes = m4c.read_notes(admits_icu, admits_last, mimic4_note_path, 
@@ -210,6 +214,6 @@ if __name__ == "__main__":
             m4c.save_multimodal_dataset(admits_last, admits_last, notes, use_events=False, output_path=args.output_path)
         else:
             m4c.save_multimodal_dataset(admits_last, admits_last, admits_last, use_events=False, use_notes=False, output_path=args.output_path)
-        print(f"Exported extracted MIMIC-IV data to CSV files to {args.output_path}.")
+        print(f"Exported extracted MIMIC-IV data as CSV files to {args.output_path}.")
 
     print("Data extraction complete.")

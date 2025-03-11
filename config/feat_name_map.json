@@ -7,7 +7,7 @@
     "is_multimorbid": "Multimorbidity (>=2 conditions)",
     "is_complex_multimorbid": "High-count Multimorbidity (>=4 conditions)",
     "phys_men_multimorbidity": "Physical/Mental Multimorbidity",
-    "physltc_active_cancer": "Active Cancer",
+    "physltc_malignant_tumor": "Malignant Tumor",
     "physltc_ischaemic_heart_disease": "Ischaemic Heart Disease",
     "physltc_hypertension": "Hypertension",
     "physltc_diabetes": "Diabetes",

@@ -4667,6 +4667,26 @@ pure-eval = "*"
 tests = ["cython", "littleutils", "pygments", "pytest", "typeguard"]
 
 [[package]]
+name = "statannotations"
+version = "0.7.1"
+description = "add statistical significance or custom annotations on seaborn plots. Based on statannot 0.2.3"
+optional = false
+python-versions = ">=3.8"
+groups = ["main"]
+markers = "python_version <= \"3.11\""
+files = [
+    {file = "statannotations-0.7.1-py3-none-any.whl", hash = "sha256:df8f3be7aadc90cba14e3caa2779cc3a543c15517ef0887c40d7591660f7a36c"},
+    {file = "statannotations-0.7.1.tar.gz", hash = "sha256:a91ac33b4f5027dca60e4120e3c7ff9f3287f8216ec38348a4f65255b02a0668"},
+]
+
+[package.dependencies]
+matplotlib = ">=2.2.2"
+numpy = ">=1.12.1"
+pandas = ">=0.23.0"
+scipy = ">=1.1.0"
+seaborn = ">=0.9.0"
+
+[[package]]
 name = "statsmodels"
 version = "0.14.4"
 description = "Statistical computations and models for Python"
@@ -5638,4 +5658,4 @@ propcache = ">=0.2.0"
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<3.12"
-content-hash = "e40b0e2b85d0263f309d715260c5ac2085dba7d0db6f91a056c9ede4f0f58b7f"
+content-hash = "7c783806852d29842e5da2afb8b24e7aeec25b97bef01804ae0004263063b594"

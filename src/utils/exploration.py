@@ -1,15 +1,18 @@
 import numpy as np
 import polars as pl
+import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mtick
 from matplotlib.patches import Patch
 import seaborn as sns
 from tableone import TableOne
 import json
+import os
 from statannotations.Annotator import Annotator
 
 def get_table_one(ed_pts: pl.DataFrame | pl.LazyFrame,  
-                  outcome: str, 
+                  outcome: str,
+                  outcome_label: str,
                   output_path: str = '../outputs/reference',
                   disp_dict_path: str = '../outputs/reference/feat_name_map.json',
                 sensitive_attr_list: list = ['Sex', 'Ethnicity', 'Marital Status', 'Insurance'],
@@ -38,14 +41,14 @@ def get_table_one(ed_pts: pl.DataFrame | pl.LazyFrame,
             ed_disp[col] = np.where(ed_disp[col]==1, 'Yes', 'No')
     ### Generate Table 1 summary with p-values for target outcome
     if verbose:
-        print(f'Generating table summary by {outcome} with prevalence {(ed_disp[outcome].value_counts(normalize=True).iloc[1]*100).round(2)}%')
+        print(f'Generating table summary by {outcome_label} with prevalence {(ed_disp[outcome_label].value_counts(normalize=True).iloc[1]*100).round(2)}%')
     tb_one_hd = TableOne(ed_disp,
-                     categorical=[col for col in cat_cols if outcome!=col], 
+                     categorical=[col for col in cat_cols if outcome_label!=col], 
                      nonnormal=nn_attr,
-                     groupby=outcome, overall=True, pval=True, htest_name=True, tukey_test=True,
+                     groupby=outcome_label, overall=True, pval=True, htest_name=True, tukey_test=True,
                      decimals=0, pval_adjust=adjust_method)
-    tb_one_hd.to_html(output_path + f'/table_one_{outcome}.html')
-    print(f'Saved table summary grouped by {outcome} to {output_path + f'/table_one_{outcome}.html'}.')
+    tb_one_hd.to_html(os.path.join(output_path, f'table_one_{outcome}.html'))
+    print(f'Saved table summary grouped by {outcome_label} to table_one_{outcome}.html.')
     return tb_one_hd
 
 def assign_age_groups(ed_pts: pl.DataFrame | pl.LazyFrame, 
@@ -58,42 +61,42 @@ def assign_age_groups(ed_pts: pl.DataFrame | pl.LazyFrame,
     """
     if isinstance(ed_pts, pl.LazyFrame):
         ed_pts = ed_pts.collect()
-    ed_pts = ed_pts.with_column(
-        pl.cut(
-            ed_pts[age_col], 
-            bins=bins, 
-            labels=labels
-        ).alias('age_group')
+    ed_pts = ed_pts.with_columns(
+        pl.when(pl.col(age_col) < bins[1]).then(pl.lit(labels[0]))
+        .when((pl.col(age_col) >= bins[1]) & (pl.col(age_col) < bins[2])).then(pl.lit(labels[1]))
+        .when((pl.col(age_col) >= bins[2]) & (pl.col(age_col) < bins[3])).then(pl.lit(labels[2]))
+        .when((pl.col(age_col) >= bins[3]) & (pl.col(age_col) < bins[4])).then(pl.lit(labels[3]))
+        .otherwise(pl.lit(labels[4])).alias('age_group')
     )
     return ed_pts.lazy() if use_lazy else ed_pts
 
 def get_age_table_by_sensitive_attr(ed_pts: pl.DataFrame | pl.LazyFrame, 
                                     attr_name: str, 
                                     outcome: str,
-                                    value_name_col: str,
-                                    use_lazy: bool = False) -> pl.DataFrame:
+                                    value_name_col: str) -> pl.DataFrame:
     """
-    Modifies the dataset into long format to group samples with and without the outcome by age.
+    Modifies the dataset into long format to group samples with the outcome by age.
     """
     if isinstance(ed_pts, pl.LazyFrame):
         ed_pts = ed_pts.collect()
+    ed_pts = ed_pts.to_pandas()
     
-    ed_inh_long = ed_pts.filter(pl.col(outcome) == 1).melt(id_vars=[attr_name], value_vars=['age_group'], variable_name='variable', value_name=value_name_col)
-    ed_inh_long = ed_inh_long.groupby([attr_name, value_name_col]).agg(pl.count().alias('# Patients'))
-    ed_y_cts = ed_inh_long.groupby(attr_name).agg(pl.sum('# Patients').alias('Total'))
-    ed_inh_long = ed_inh_long.join(ed_y_cts, on=attr_name)
-    ed_inh_long = ed_inh_long.with_column((pl.col('# Patients') / pl.col('Total')).round(4).alias('Percentage'))
+    ed_inh_long = pd.melt(ed_pts[ed_pts[outcome]=='Y'], id_vars=[attr_name], value_vars=['age_group'], value_name=value_name_col)
+    ed_inh_long = ed_inh_long.groupby([attr_name, value_name_col], observed=False).size().reset_index(name='# Patients')
+    ed_y_cts = ed_inh_long.groupby(attr_name)['# Patients'].apply(lambda x: x.sum()).reset_index().rename(columns={'# Patients': 'Total'})
+    ed_inh_long = ed_inh_long.merge(ed_y_cts, how='left', on=attr_name)
+    ed_inh_long['Percentage'] = round(ed_inh_long['# Patients']/ed_inh_long['Total'], 4)
     
-    return ed_inh_long.lazy() if use_lazy else ed_inh_long
+    return ed_inh_long
 
 def plot_outcome_dist_by_sensitive_attr(ed_pts: pl.DataFrame | pl.LazyFrame, 
                                         attr_col: str,
                                         attr_xlabel: str, 
                                         output_path: str = '../outputs/reference', 
-                                        outcome_list: list = ['in_hosp_death', 'ext_stay_7', 'non_home_discharge','icu_admission'],
-                                        outcome_title: list = ['In-hospital death', 'Extended stay (>7 days)', 'Non-home discharge', 'ICU admission'],
-                                        outcome_legend: dict = {'In-hospital death': ['No', 'Yes'], 'Extended stay (>7 days)': ['No', 'Yes'],
-                                                    'Non-home discharge': ['No', 'Yes'], 'ICU admission': ['No', 'Yes']},
+                                        outcome_list: list = ['in_hosp_death', 'ext_stay_7', 'non_home_discharge', 'icu_admission'],
+                                        outcome_title: list = ['In-hospital Death', 'Extended Hospital Stay', 'Non-home Discharge', 'ICU Admission'],
+                                        outcome_legend: dict = {'In-hospital Death': ['No', 'Yes'], 'Extended Hospital Stay': ['No', 'Yes'],
+                                                    'Non-home Discharge': ['No', 'Yes'], 'ICU Admission': ['No', 'Yes']},
                                         maxi: int=2, maxj: int=2,
                                         rot: int=0, 
                                         figsize: tuple = (8,6), 
@@ -110,15 +113,17 @@ def plot_outcome_dist_by_sensitive_attr(ed_pts: pl.DataFrame | pl.LazyFrame,
     fig.supxlabel(attr_xlabel, fontsize=14)
     fig.supylabel('Percentage of patients with ED attendance', fontsize=14)
     outcome_idx = 0
+    if attr_col == 'race_group':
+        ed_pts = ed_pts.with_columns(pl.when(pl.col(attr_col) == 'Hispanic/Latino').then(pl.lit('His/Latino')).otherwise(pl.col(attr_col)).alias(attr_col))
+    unique_values = ed_pts.select(attr_col).unique().to_series().to_list()[::-1]
     for i in range(maxi):
         for j in range(maxj):
             ed_gr = ed_pts.groupby([attr_col, outcome_list[outcome_idx]]).agg(pl.count().alias('count')).to_pandas()
             total_counts = ed_gr.groupby(attr_col)['count'].transform('sum')
             ed_gr['percentage'] = ed_gr['count'] / total_counts * 100
-            
             # Plot relative percentages
             sns.barplot(data=ed_gr, x=attr_col, y='percentage', hue=outcome_list[outcome_idx], ax=ax[i][j],
-                        palette=palette)
+                        palette=palette, order=unique_values)
             handles = [Patch(color=palette[k], label=outcome_legend[outcome_title[outcome_idx]][k]) for k in range(len(outcome_legend[outcome_title[outcome_idx]]))]
             ax[i][j].legend(handles=handles, title=outcome_title[outcome_idx])
             ax[i][j].set_xlabel('')
@@ -131,16 +136,16 @@ def plot_outcome_dist_by_sensitive_attr(ed_pts: pl.DataFrame | pl.LazyFrame,
             outcome_idx+=1
 
     plt.tight_layout()
-    plt.savefig(output_path + f'/outcome_dist_by_{attr_col}.png')
-    print(f'Saved plot to {output_path + f'/outcome_dist_by_{attr_col}.png'}.')
-    plt.show()
+    plt.savefig(os.path.join(output_path, f"outcome_dist_by_{attr_col}.png"))
+    print(f"Saved plot to outcome_dist_by_{attr_col}.png.")
+    #plt.show()
 
 def plot_age_dist_by_sensitive_attr(ed_pts: pl.DataFrame | pl.LazyFrame, 
                                     attr_col: str,
                                     attr_xlabel: str, 
                                     output_path: str = '../outputs/reference', 
                                     outcome_list: list = ['in_hosp_death', 'ext_stay_7', 'non_home_discharge','icu_admission'],
-                                    outcome_title: list = ['In-hospital death', 'Extended stay (>7 days)', 'Non-home discharge', 'ICU admission'],
+                                    outcome_title: list = ['In-hospital Death', 'Extended Hospital Stay', 'Non-home Discharge', 'ICU Admission'],
                                     maxi: int=2, maxj: int=2,
                                     colors: list = ['#fef0d9', '#fdcc8a', '#fc8d59', '#e34a33', '#b30000'],
                                     labels: list = ['<50', '50-59', '60-69', '70-79', '80+'],
@@ -157,15 +162,29 @@ def plot_age_dist_by_sensitive_attr(ed_pts: pl.DataFrame | pl.LazyFrame,
     fig.suptitle('Age distribution by sensitive variable in patients with adverse event.', fontsize=16)
     fig.supxlabel(attr_xlabel, fontsize=14)
     fig.supylabel('Percentage of patients with ED attendance', fontsize=14)
+    
+    if attr_col == 'race_group':
+        ed_pts = ed_pts.with_columns(pl.when(pl.col(attr_col) == 'Hispanic/Latino').then(pl.lit('His/Latino')).otherwise(pl.col(attr_col)).alias(attr_col))
+    ### Recode outcome variables as 'N', 'Y' for plotting
+    for outcome in outcome_list:
+        ed_pts = ed_pts.with_columns(pl.when(pl.col(outcome) == 1).then(pl.lit('Y')).otherwise(pl.lit('N')).alias(outcome))
     outcome_idx = 0
     lg_flag = False
     for i in range(maxi):
         for j in range(maxj):
             lg_flag = True if outcome_idx == 1 else False
             ed_long = get_age_table_by_sensitive_attr(ed_pts, attr_col, outcome_list[outcome_idx], 'age_'+attr_xlabel)
-            ed_long_pivot = ed_long.pivot(index=attr_col, columns='age_'+attr_xlabel, values='Percentage')
-            ed_long_pivot = ed_long_pivot.to_pandas()
-            ed_long_pivot.plot(kind='bar', stacked=True, ax=ax[i][j], legend=lg_flag, color=colors)
+            
+            # Reorder rows in 'age_'+attr_xlabel according to order in list 'labels'
+            ed_long['age_'+attr_xlabel] = pd.Categorical(ed_long['age_'+attr_xlabel], categories=labels, ordered=True)
+            ed_long = ed_long.sort_values(by=[attr_col, 'age_'+attr_xlabel])
+            ax[i][j] = pd.pivot_table(ed_long[[attr_col, 'age_'+attr_xlabel, 'Percentage']], columns='age_'+attr_xlabel,
+                                      index=attr_col, sort=True, observed=False).plot(title=outcome_title[outcome_idx],
+                                                                    kind='bar', stacked=True, figsize=figsize,
+                                                                      ax=ax[i][j], legend=lg_flag,
+                                                                      color=colors)
+            #print(ed_long_pivot.head())
+            #ed_long_pivot.plot(kind='bar', stacked=True, ax=ax[i][j], legend=lg_flag, color=colors)
             ax[i][j].set_title(outcome_title[outcome_idx])
             if lg_flag:
                 ax[i][j].legend(title='Age Group', labels=labels, bbox_to_anchor=(1,1))
@@ -179,15 +198,17 @@ def plot_age_dist_by_sensitive_attr(ed_pts: pl.DataFrame | pl.LazyFrame,
             outcome_idx+=1
             
     plt.tight_layout()
-    plt.savefig(output_path + f'/age_dist_by_{attr_col}.png')
-    print(f'Saved plot to {output_path + f'/age_dist_by_{attr_col}.png'}.')
-    plt.show()
+
+    plt.savefig(os.path.join(output_path, f"age_dist_by_{attr_col}.png"))
+    print(f'Saved plot to age_dist_by_{attr_col}.png.')
+    #plt.show()
 
 def plot_token_length_by_attribute(ed_pts: pl.DataFrame | pl.LazyFrame, 
                                   output_path: str = '../outputs/reference',
-                                    attr_list: list = ['gender', 'insurance', 'race_group', 'marital_status'],
+                                    sensitive_attr_list: list = ['gender', 'insurance', 'race_group', 'marital_status'],
                                     attr_title: list = ['Gender', 'Insurance type', 'Ethnicity', 'Marital status'],
-                                    maxi: int=2, maxj:int=2,
+                                    out_fname: str = 'bhc_dist_by_attr.png',
+                                    maxi: int=2, maxj: int=2,
                                     figsize: tuple=(8,6), rot: int=0, ylim: tuple=(0,12),
                                     gr_pairs: dict = {'gender': [('M', 'F')], 
                                               'insurance': [('Medicare', 'Medicaid'), ('Medicare', 'Private'), ('Medicaid', 'Private')],
@@ -198,6 +219,7 @@ def plot_token_length_by_attribute(ed_pts: pl.DataFrame | pl.LazyFrame,
                                               },
                                     suptitle: str = 'BHC token length by sensitive variable in patients with ED attendance.',
                                     outcome_mode: bool = False,
+                                    unique_value_order: list = ['N', 'Y'],
                                     adjust_method: str = 'bonferroni',
                                     test_type: str = 't-test_welch'):
     """"
@@ -207,10 +229,11 @@ def plot_token_length_by_attribute(ed_pts: pl.DataFrame | pl.LazyFrame,
         ed_pts = ed_pts.collect()
 
     ### log transform target tokens as they are right-skewed
-    ed_pts = ed_pts.with_column((pl.col('num_target_tokens').log1p()).alias('num_target_tokens_lg'))
+    ed_pts = ed_pts.with_columns((pl.col('num_target_tokens').log1p()).alias('num_target_tokens_lg'))
     ## Exclude other categories
     ed_pts = ed_pts.filter(pl.col('race_group') != 'Other')
     ed_pts = ed_pts.filter(pl.col('insurance') != 'Other')
+
     ### Set plot config
     plt.rcParams.update({'font.size': 12, 'font.weight': 'normal', 'font.family': 'serif'})
     fig, ax = plt.subplots(2, 2, figsize=figsize, sharey=True)
@@ -221,8 +244,11 @@ def plot_token_length_by_attribute(ed_pts: pl.DataFrame | pl.LazyFrame,
         for j in range(maxj):
             ### If exploring health outcomes, relabel the categories
             if outcome_mode:
-                ed_pts = ed_pts.with_column(pl.when(pl.col(attr_list[attr_idx]) == 1).then('Y').otherwise('N').alias(attr_list[attr_idx]))
-            ax[i][j] = sns.violinplot(data=ed_pts.to_pandas(), x=attr_list[attr_idx], y='num_target_tokens_lg', ax=ax[i][j])
+                ed_pts = ed_pts.with_columns(pl.when(pl.col(sensitive_attr_list[attr_idx]) == 1).then(pl.lit('Y')).otherwise(pl.lit('N')).alias(sensitive_attr_list[attr_idx]))
+                ax[i][j] = sns.violinplot(data=ed_pts.to_pandas(), x=sensitive_attr_list[attr_idx], y='num_target_tokens_lg', ax=ax[i][j],
+                                      order=unique_value_order)
+            else:
+                ax[i][j] = sns.violinplot(data=ed_pts.to_pandas(), x=sensitive_attr_list[attr_idx], y='num_target_tokens_lg', ax=ax[i][j])
             ax[i][j].set_xlabel(attr_title[attr_idx])
             ax[i][j].set_ylabel('')
             if j == 1:
@@ -231,16 +257,17 @@ def plot_token_length_by_attribute(ed_pts: pl.DataFrame | pl.LazyFrame,
             plt.xticks(rotation=rot, ha='center')
             plt.ylim(ylim)
             ### Annotate significant differences
-            print(f'Annotating significant differences for {attr_list[attr_idx]}')
-            annot = Annotator(ax[i][j], data=ed_pts.to_pandas(), x=attr_list[attr_idx], y='num_target_tokens_lg', pairs=gr_pairs[attr_list[attr_idx]])
+            print(f'Annotating significant differences for {sensitive_attr_list[attr_idx]}')
+            annot = Annotator(ax[i][j], data=ed_pts.to_pandas(), x=sensitive_attr_list[attr_idx], y='num_target_tokens_lg', pairs=gr_pairs[sensitive_attr_list[attr_idx]])
             annot.configure(test=test_type, text_format='star', loc='outside', verbose=0, comparisons_correction=adjust_method)
             annot._pvalue_format.pvalue_thresholds = [[0.001, '***'], [0.01, '**'], [0.1, '*'], [1, 'ns']]
             annot.apply_and_annotate()
             attr_idx += 1
 
     plt.tight_layout(pad=0.5)
-    plt.savefig(output_path)
-    print(f'Saved plot to {output_path}.')
-    plt.show()
+    tgt = os.path.join(output_path, out_fname)
+    plt.savefig(tgt)
+    print(f'Saved plot to {tgt}.')
+    #plt.show()
 
 

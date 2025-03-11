@@ -3,7 +3,7 @@ import os
 import numpy as np
 import polars as pl
 import pandas as pd
-from utils.preprocessing import clean_labevents, prepare_medication_features, rename_fields
+from utils.preprocessing import clean_labevents, prepare_medication_features, rename_fields, transform_sensitive_attributes
 
 def read_admissions_table(
     mimic4_path: str, use_lazy: bool = False, verbose: bool = True,
@@ -121,6 +121,7 @@ def read_patients_table(
         pl.col("in_hosp_death").fill_null(0).cast(pl.Int8),
         pl.col("non_home_discharge").fill_null(0).cast(pl.Int8)
     )
+    pats = transform_sensitive_attributes(pats)
 
     if verbose:
         print(f"Subjects with in-hospital death: {pats.filter(pl.col('in_hosp_death') == 1).select('subject_id').n_unique()}, % of pts: {pats.filter(pl.col('in_hosp_death') == 1).select('subject_id').n_unique() / pats.select('subject_id').n_unique() * 100:.2f}")
@@ -330,7 +331,7 @@ def get_notes_population(adm_notes: pl.DataFrame | pl.LazyFrame,
     ### Filter population with at least one note
     ed_pts = admit_last.filter(pl.col('subject_id').is_in(notes_grouped.select('subject_id')))
     ## Save number of tokens per patient
-    ed_pts = ed_pts.join(notes_grouped.select(['subject_id', 'num_input_tokens', 'num_target_tokens']), on='subject_id', how='left')
+    ed_pts = ed_pts.join(notes_grouped.select(['subject_id', 'num_summaries', 'num_input_tokens', 'num_target_tokens']), on='subject_id', how='left')
     
     return ed_pts.lazy() if use_lazy else ed_pts, notes_grouped.lazy() if use_lazy else notes_grouped
 
@@ -466,7 +467,7 @@ def read_vitals_table(
 
 def read_labevents_table(
     mimic4_path: str, admits_last: pl.DataFrame | pl.LazyFrame, 
-    include_items: str = '../outputs/reference/lab_items.csv'
+    include_items: str = '../config/lab_items.csv'
 ) -> pl.LazyFrame:
     """Reads in events.csv.gz tables from MIMIC-IV and formats column types.
 

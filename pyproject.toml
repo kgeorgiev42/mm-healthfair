@@ -31,6 +31,7 @@ lightning = "^2.5.0.post0"
 tableone = "^0.9.1"
 pyarrow = "^19.0.1"
 pandas = "^2.2.3"
+statannotations = "^0.7.1"
 
 [tool.poetry.group.dev.dependencies]
 deptry = "^0.16.1"

@@ -1,11 +1,7 @@
 import argparse
 import os
 import sys
-import shutil
-import gzip
-import numpy as np
 import polars as pl
-from tqdm import tqdm
 import toml
 
 import utils.exploration as m4exp
@@ -20,7 +16,7 @@ if __name__ == "__main__":
         "-c",
         type=str,
         help="Path to config toml file containing lookup fields for grouping.",
-        default="targets.toml",
+        default="../config/targets.toml",
     )
     parser.add_argument(
         "--output_path",
@@ -34,7 +30,14 @@ if __name__ == "__main__":
         "-d",
         type=str,
         help="Path to dictionary for display names of features.",
-        default="../outputs/reference/feat_name_map.json",
+        default="../config/feat_name_map.json",
+    )
+    parser.add_argument(
+        "--bhc_fname",
+        "-b",
+        type=str,
+        help="File name for BHC distribution plot.",
+        default="bhc_dist_by_outcome.png",
     )
     parser.add_argument(
         "--pval_adjust",
@@ -47,7 +50,7 @@ if __name__ == "__main__":
         "--pval_test",
         type=str,
         help="Test type for comparing distribution of BHC token lengths. Defaults to 't-test welch'.",
-        default="t-test welch",
+        default="t-test_welch",
     )
     parser.add_argument(
         "--max_i",
@@ -105,36 +108,33 @@ if __name__ == "__main__":
 
     print('Generating summary tables and plots across all defined outcomes and attributes.')
     ed_pts = m4exp.assign_age_groups(ed_pts, bins=age_bins, labels=age_labels, use_lazy=args.lazy)
-    for outcome in outcomes:
+    for (outcome, label) in zip(outcomes, outcome_labels):
         print(f"Generating summary table one by {outcome}..")
-        m4exp.get_table_one(ed_pts, args.output_path, outcome, args.display_dict_path, 
+        m4exp.get_table_one(ed_pts, outcome, label, args.output_path, args.display_dict_path, 
                             sensitive_attr_list=attribute_labels, nn_attr=nn_attr,
                             verbose=args.verbose, adjust_method=args.pval_adjust,
                             cat_cols=categorical)
     print(f"Plotting outcome distribution by sensitive attributes..")
     for (attribute, label) in zip(attributes, attribute_labels):
         m4exp.plot_outcome_dist_by_sensitive_attr(ed_pts, attribute, label, args.output_path,
-                                                  outcomes, outcome_labels, 
-                                                  cat_cols=categorical, max_i=args.max_i, 
-                                                  max_j=args.max_j, rot=args.rot,
+                                                  outcomes, outcome_labels, maxi=args.max_i, 
+                                                  maxj=args.max_j, rot=args.rot,
                                                   figsize=(8, 8))
     print(f"Plotting age distribution by sensitive attributes..")
     for (attribute, label) in zip(attributes, attribute_labels):
         m4exp.plot_age_dist_by_sensitive_attr(ed_pts, attribute, label, args.output_path,
                                                   outcomes, outcome_labels, labels=age_labels,
-                                                  cat_cols=categorical, max_i=args.max_i, 
-                                                  max_j=args.max_j, rot=args.rot,
+                                                  maxi=args.max_i, maxj=args.max_j, 
+                                                  rot=args.rot,
                                                   figsize=(8, 8))
     print(f"Plotting distribution of BHC token lengths by outcome and attributes..")
     m4exp.plot_token_length_by_attribute(ed_pts, args.output_path, attributes, attribute_labels,
-                                sensitive_attr_list=attribute_labels, cat_cols=categorical,
-                                max_i=args.max_i, max_j=args.max_j, rot=args.rot,
-                                figsize=(8, 8), test=args.pval_test)
-    m4exp.plot_token_length_by_attribute(ed_pts, args.output_path, attr_list=outcomes, 
-                                         attr_title=outcome_labels,
-                                sensitive_attr_list=attribute_labels, cat_cols=categorical,
-                                max_i=args.max_i, max_j=args.max_j, rot=args.rot,
-                                figsize=(8, 8), test=args.pval_test, 
+                                maxi=args.max_i, maxj=args.max_j, rot=args.rot,
+                                figsize=(8, 13), test_type=args.pval_test)
+    m4exp.plot_token_length_by_attribute(ed_pts, args.output_path, outcomes, outcome_labels,
+                                         out_fname=args.bhc_fname,
+                                maxi=args.max_i, maxj=args.max_j, rot=args.rot,
+                                figsize=(8, 8), test_type=args.pval_test, 
                                 gr_pairs={'in_hosp_death': [('N', 'Y')], 
                                         'ext_stay_7': [('N', 'Y')], 
                                         'non_home_discharge': [('N', 'Y')], 

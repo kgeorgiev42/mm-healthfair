@@ -12,7 +12,7 @@ from utils.functions import read_icd_mapping, contains_both_ltc_types, rename_fi
 ###############################
 
 def preproc_icd_module(diagnoses: pl.DataFrame | pl.LazyFrame, 
-                       icd_map_path: str = "../outputs/reference/icd9to10.txt", 
+                       icd_map_path: str = "../config/icd9to10.txt", 
                        map_code_colname: str = "diagnosis_code", only_icd10: bool = True, 
                        ltc_dict_path: str = "../outputs/icd10_codes.json",
                        verbose=True, use_lazy: bool = False) -> pl.DataFrame:
@@ -146,12 +146,20 @@ def transform_sensitive_attributes(ed_pts: pl.DataFrame) -> pl.DataFrame:
         pl.DataFrame: Updated data.
     """
 
-    ed_pts['anchor_age'] = ed_pts['anchor_age'].astype(np.int16)
-    ed_pts['race_group'] = np.where(ed_pts['race'].str.contains('white|middle eastern|portuguese', case=False), 'White', 'Other')
-    ed_pts['race_group'] = np.where(ed_pts['race'].str.contains('black|caribbean island', case=False), 'Black', ed_pts['race_group'])
-    ed_pts['race_group'] = np.where(ed_pts['race'].str.contains('hispanic|south american', case=False), 'Hispanic/Latino', ed_pts['race_group'])
-    ed_pts['race_group'] = np.where(ed_pts['race'].str.contains('asian', case=False), 'Asian', ed_pts['race_group'])
-    ed_pts['marital_status'] = ed_pts['marital_status'].str.lower().str.capitalize()
+    ed_pts = ed_pts.with_columns([
+        pl.col('anchor_age').cast(pl.Int16),
+        pl.when(pl.col('race').str.to_lowercase().str.contains('white|middle eastern|portuguese'))
+          .then(pl.lit('White'))
+          .when(pl.col('race').str.to_lowercase().str.contains('black|caribbean island'))
+          .then(pl.lit('Black'))
+          .when(pl.col('race').str.to_lowercase().str.contains('hispanic|south american'))
+          .then(pl.lit('Hispanic/Latino'))
+          .when(pl.col('race').str.to_lowercase().str.contains('asian'))
+          .then(pl.lit('Asian'))
+          .otherwise(pl.lit('Other'))
+          .alias('race_group'),
+        pl.col('marital_status').str.to_lowercase().str.to_titlecase()
+    ])
 
     return ed_pts
 

@@ -1,6 +1,6 @@
 [outcomes]
-labels = ['in_hosp_death', 'ext_stay_7', 'non_home_discharge', 'icu_admission'],
-display = ['In-hospital death', 'Extended stay (>7 days)', 'Non-home discharge', 'ICU admission']
+labels = ['in_hosp_death', 'ext_stay_7', 'non_home_discharge', 'icu_admission']
+display = ['In-hospital Death', 'Extended Hospital Stay', 'Non-home Discharge', 'ICU Admission']
 
 [attributes]
 labels = ['gender', 'race_group', 'marital_status', 'insurance']
