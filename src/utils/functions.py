@@ -1,7 +1,10 @@
 import pickle
 from typing import Any
+import os
 
 import polars as pl
+import pandas as pd
+from tableone import TableOne
 
 
 def load_pickle(filepath: str) -> Any:
@@ -181,6 +184,42 @@ def get_demographics_summary(ed_pts: pl.DataFrame | pl.LazyFrame) -> None:
     print(ed_pts.is_multimorbid.value_counts(normalize=True))
     print(ed_pts.is_complex_multimorbid.value_counts(normalize=True))
     print('-------------------------------')
+
+def get_train_split_summary(train: pd.DataFrame, 
+                              val: pd.DataFrame, 
+                              test: pd.DataFrame,
+                              outcome: str="in_hosp_death",
+                              output_path: str="../outputs/exp_data",
+                              cont_cols: list=['Age'],
+                              nn_cols: list=['Age'],
+                              disp_dict: dict={
+                                'anchor_age': 'Age',
+                                'gender': 'Gender',
+                                'race_group': 'Ethnicity',
+                                'insurance': 'Insurance',
+                                'marital_status': 'Marital status',
+                                'in_hosp_death': 'In-hospital death',
+                                'ext_stay_7': 'Extended stay',
+                                'non_home_discharge': 'Non-home discharge',
+                                'icu_admission': 'ICU admission',
+                                'is_multimorbid': 'Multimorbidity',
+                                'is_complex_multimorbid': 'Complex multimorbidity'
+                            },
+                            verbose: bool=True) -> None:
+    
+    """Helper function to print statistical train-validation-test split summary."""
+    if verbose:
+        print(f'Saving demographic summary for training split of outcome {outcome}.')
+    samples = pd.concat([train, val, test], axis=0)
+    samples_disp = samples.rename(columns=disp_dict)
+    sum_table = TableOne(samples_disp, [col for col in disp_dict.keys()],
+                         categorical=[col for col in disp_dict.keys() if col not in cont_cols],
+                         overall=True, groupby='set', pval=True, htest_name=True,
+                         tukey_test=True, nonormal=nn_cols)
+    sum_table.to_html(os.path.join(output_path, f'train_summary_{outcome}.html'))
+    if verbose:
+        print(f'Saved to train_summary_{outcome}.html.')
+
 
 def rename_fields(col):
     """Helper rename function for drug and specialty feature names."""

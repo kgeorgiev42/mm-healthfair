@@ -3,12 +3,14 @@ import polars as pl
 import pandas as pd
 import spacy
 import json
+import os
 from tqdm import tqdm
+from sklearn.model_selection import train_test_split
 from transformers import AutoModel, AutoTokenizer
-from utils.functions import read_icd_mapping, contains_both_ltc_types, rename_fields
+from utils.functions import read_icd_mapping, contains_both_ltc_types, rename_fields, get_train_split_summary
 
 ###############################
-# Static data preprocessing
+# EHR data preprocessing
 ###############################
 
 def preproc_icd_module(diagnoses: pl.DataFrame | pl.LazyFrame, 
@@ -163,36 +165,6 @@ def transform_sensitive_attributes(ed_pts: pl.DataFrame) -> pl.DataFrame:
 
     return ed_pts
 
-
-def encode_categorical_features(stays: pl.DataFrame) -> pl.DataFrame:
-    """Groups and applied one-hot encoding to categorical features.
-
-    Args:
-        stays (pl.DataFrame): Stays data.
-
-    Returns:
-        pl.DataFrame: Transformed stays data.
-    """
-    if "gender" in stays.columns:
-        stays = transform_gender(stays)
-    if "race" in stays.columns:
-        stays = transform_race(stays)
-    if "marital_status" in stays.columns:
-        stays = transform_marital(stays)
-    if "insurance" in stays.columns:
-        stays = transform_insurance(stays)
-
-    # apply one-hot encoding to integer columns
-    stays = stays.to_dummies(
-        [
-            i
-            for i in stays.columns
-            if i in ["gender", "race", "marital_status", "insurance"]
-        ]
-    )
-
-    return stays
-
 def prepare_medication_features(medications: pl.DataFrame | pl.LazyFrame,
                                 admits_last: pl.DataFrame | pl.LazyFrame,
                                 top_n: int = 50,
@@ -224,7 +196,7 @@ def prepare_medication_features(medications: pl.DataFrame | pl.LazyFrame,
     medications['medication'] = np.where(medications['medication'].str.contains('vancomycin'), 'vancomycin', medications['medication'])
     medications['medication'] = np.where(medications['medication'].str.contains('acetaminophen'), 'acetaminophen', medications['medication'])
     medications['medication'] = np.where(medications['medication'].str.contains('albuterol_0.083%_neb_soln'), 'albuterol_neb_soln', medications['medication'])
-    medications['medication'] = np.where(medications['medication'].str.contains('n_presc_oxycodone_(immediate_release)', regex=False), 'n_presc_oxycodone', medications['medication'])
+    medications['medication'] = np.where(medications['medication'].str.contains('oxycodone_(immediate_release)', regex=False), 'oxycodone', medications['medication'])
     ### Get days since first and last medication
     medications = medications.sort_values(['subject_id', 'medication', 'charttime'])
     meds_min = medications.drop_duplicates(subset=['subject_id', 'medication'], keep='first')
@@ -258,12 +230,176 @@ def prepare_medication_features(medications: pl.DataFrame | pl.LazyFrame,
     admits_last[nums_cols] = admits_last[nums_cols].fillna(0).astype(np.int16)
     
     admits_last['total_n_presc'] = admits_last['total_n_presc'].fillna(0).astype(np.int8)
+    admits_last.columns = admits_last.columns.str.replace('(', '').str.replace(')', '')
+
     admits_last = pl.DataFrame(admits_last)
 
     return admits_last.lazy() if use_lazy else admits_last
     
+def encode_categorical_features(ehr_data: pl.DataFrame) -> pl.DataFrame:
+    """Applies one-hot encoding to categorical features.
 
+    Args:
+        ehr_data (pl.DataFrame): Static EHR dataset.
 
+    Returns:
+        pl.DataFrame: Transformed EHR data.
+    """
+
+    # prepare attribute features for one-hot-encoding
+    ehr_data = ehr_data.with_columns([
+        pl.when(pl.col('race_group') == 'Hispanic/Latino').then(pl.lit('Hispanic_Latino')).otherwise(pl.col('race_group')).alias('race_group'),
+        pl.when(pl.col('gender') == 'F').then(1).otherwise(0).cast(pl.Int8).alias('gender_F')
+    ])
+    ehr_data = ehr_data.to_dummies(columns=["race_group", "marital_status", "insurance"])
+    ehr_data = ehr_data.drop('race')
+    return ehr_data
+
+def extract_lookup_fields(ehr_data: pl.DataFrame,
+                          lookup_list: list = ['hadm_id', 'yob', 'dod', 'admittime',
+                                               'dischtime', 'deathtime', 'edregtime',
+                                               'edouttime', 'admission_location',
+                                               'discharge_location', 'los_days',
+                                               'icu_los_days', 'ltc_code',
+                                               'num_summaries', 'num_input_tokens',
+                                               'num_target_tokens', 'num_measures',
+                                               'total_proc_count'],
+                          lookup_output_path: str = '../outputs/reference') -> pl.DataFrame:
+    """Extract dates and summary fields not suitable for training in a separate dataframe.
+
+    Args:
+        ehr_data (pl.DataFrame): Static EHR dataset.
+
+    Returns:
+        pl.DataFrame: Transformed EHR data.
+    """
+    ehr_lookup = ehr_data.select(['subject_id'] + lookup_list)
+    ehr_data = ehr_data.drop(lookup_list)
+    ehr_lookup.write_csv(os.path.join(lookup_output_path, 'ehr_lookup.csv'))
+    return ehr_data
+
+def remove_correlated_features(ehr_data: pl.DataFrame,
+                          feats_to_save: list = ['anchor_age', 'gender_F', 
+                                                 'race_group_Hispanic_Latino', 'race_group_Black', 'race_group_White',
+                                                 'race_group_Asian', 'race_group_Other',
+                                                 'marital_status_Married', 'marital_status_Single', 'marital_status_Widowed', 'marital_status_Divorced',
+                                                 'insurance_Medicare', 'insurance_Medicaid', 'insurance_Private', 'insurance_Other',
+                                                 'in_hosp_death', 'ext_stay_7', 'icu_admission', 'non_home_discharge'],
+                          threshold: float = 0.9,
+                          method: str = 'pearson',
+                          verbose: bool = True) -> pl.DataFrame:
+    """Drop highly correlated features from static EHR dataset, while specifying features to explicitly save for training.
+
+    Args:
+        ehr_data (pl.DataFrame): Static EHR dataset.
+
+    Returns:
+        pl.DataFrame: Transformed EHR data.
+    """
+    ### Specify features to save
+    ehr_save = ehr_data.select(['subject_id'] + feats_to_save)
+    ehr_data = ehr_data.drop(['subject_id'] + feats_to_save)
+    
+    ### Generate a linear correlation matrix
+    corr_matrix = ehr_data.to_pandas().corr(method=method)
+    iters = range(len(corr_matrix.columns) - 1)
+    drop_cols = []
+    
+    for i in tqdm(iters, desc='Dropping highly correlated features...'):
+        for j in range(i + 1):
+            item = corr_matrix.iloc[j:(j + 1), (i + 1):(i + 2)]
+            colname = item.columns
+            row = item.index
+            val = abs(item.values)
+            if val >= threshold:
+                if verbose:
+                    print(f'Detected correlation: {colname.values[0]} || {row.values[0]} || {round(val[0][0], 2)}')
+                drop_cols.append(colname.values[0])
+    
+    to_drop = list(set(drop_cols))
+    ehr_data = ehr_data.drop(to_drop)
+    ehr_data = ehr_data.join(ehr_save, on='subject_id', how='inner')
+    
+    if verbose:
+        print(f'Dropped {len(to_drop)} highly correlated features.')
+        print('-------------------------------------')
+        print('Full list of dropped features:', to_drop)
+        print('-------------------------------------')
+        print(f'Final number of EHR features: {ehr_data.shape[1]}')
+    
+    return ehr_data
+
+def generate_train_val_test_set(ehr_data: pl.DataFrame,
+                                output_path: str = '../outputs/prep_data',
+                                outcome_col: str = 'in_hosp_death',
+                                output_summary_path: str = '../outputs/exp_data',
+                                seed: int = 0,
+                                train_ratio: float = 0.8,
+                                val_ratio: float = 0.1,
+                                test_ratio: float = 0.1,
+                                cont_cols: list=['Age'],
+                                nn_cols: list=['Age'],
+                                disp_dict: dict={
+                                    'anchor_age': 'Age',
+                                    'gender': 'Gender',
+                                    'race_group': 'Ethnicity',
+                                    'insurance': 'Insurance',
+                                    'marital_status': 'Marital status',
+                                    'in_hosp_death': 'In-hospital death',
+                                    'ext_stay_7': 'Extended stay',
+                                    'non_home_discharge': 'Non-home discharge',
+                                    'icu_admission': 'ICU admission',
+                                    'is_multimorbid': 'Multimorbidity',
+                                    'is_complex_multimorbid': 'Complex multimorbidity'
+                                },
+                                stratify: bool = True,
+                                verbose: bool = True) -> dict:
+    """Create train/val/test split from static EHR dataset and save the patient IDs in separate files.
+
+    Args:
+        ehr_data (pl.DataFrame): Static EHR dataset.
+
+    Returns:
+        pl.DataFrame: Transformed EHR data.
+    """
+    ### Set stratification columns to include sensitive attributes + target outcome
+    ehr_data = ehr_data.to_pandas()
+    if stratify:
+        strat_target = pd.concat([ehr_data[outcome_col], 
+                                  ehr_data['Sex'], 
+                                  ehr_data['race_group'],
+                                  ehr_data['marital_status'],
+                                  ehr_data['insurance']], axis=1)
+        split_target = ehr_data.drop([outcome_col, 'Sex', 'race_group', 
+                                      'marital_status', 'insurance'], axis=1)
+    ### Generate split dataframes
+    train_x, test_x, train_y, test_y = train_test_split(split_target, strat_target, 
+                                                        test_size=test_ratio, 
+                                                        random_state=seed, 
+                                                        stratify=strat_target)
+    train_x, val_x, train_y, val_y = train_test_split(split_target, strat_target,
+                                                    test_size=val_ratio/(train_ratio+val_ratio),
+                                                    random_state=seed,
+                                                    stratify=strat_target)
+    train_x = pd.concat([train_x, train_y], axis=1)
+    val_x = pd.concat([val_x, val_y], axis=1)
+    test_x = pd.concat([test_x, test_y], axis=1)
+    train_x['set'] = 'train'
+    val_x['set'] = 'val'
+    test_x['set'] = 'test'
+    ### Print summary statistics
+    if verbose:
+        print('Getting summary statistics for split...')
+        get_train_split_summary(train_x, val_x, test_x, outcome_col, output_path, 
+                                cont_cols, nn_cols, disp_dict, verbose=verbose)
+        
+    ### Save patient IDs
+    train_x[['subject_id']].to_csv(os.path.join(output_path, 'training_ids.csv'), index=False)
+    val_x[['subject_id']].to_csv(os.path.join(output_path, 'validation_ids.csv'), index=False)
+    test_x[['subject_id']].to_csv(os.path.join(output_path, 'testing_ids.csv'), index=False)
+
+    return {'train': train_x, 'val': val_x, 'test': test_x}
+    
 ###############################
 # Notes preprocessing
 ###############################
@@ -272,7 +408,11 @@ def prepare_medication_features(medications: pl.DataFrame | pl.LazyFrame,
 def clean_notes(notes: pl.DataFrame | pl.LazyFrame) -> pl.DataFrame | pl.LazyFrame:
     # Remove __
     notes = notes.with_columns(
-        subtext=pl.col("subtext").str.replace_all(r"\s___\s", " ")
+        target=pl.col("target").str.replace_all(r"\s___\s", " ")
+    )
+    # Remove any extra whitespaces
+    notes = notes.with_columns(
+        target=pl.col("target").str.replace_all(r"\s+", " ")
     )
 
     return notes
