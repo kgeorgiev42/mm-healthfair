@@ -218,7 +218,7 @@ def read_diagnoses_table(
     
     # Get list of eligible hospital episodes as historical data
     adm_lkup = admissions_data.join(
-        adm_last.select(['subject_id', 'edregtime']).rename({'edregtime': 'last_edregtime'}),
+        adm_last.select(['subject_id', 'edregtime', 'prev_edregtime', 'prev_dischtime']).rename({'edregtime': 'last_edregtime'}),
         on='subject_id',
         how='left'
     )
@@ -371,9 +371,9 @@ def read_omr_table(
     omr = omr.drop(["seq_num", "chartdate"])
 
     ### Prepare hospital measures time-series
-    omr = omr.join(admits_last.select(["subject_id", "edregtime"]), on="subject_id", how="left")
-    omr = omr.filter(pl.col("charttime") <= pl.col("edregtime"))
-    omr = omr.drop("edregtime")
+    omr = omr.join(admits_last.select(["subject_id", "prev_edregtime", "prev_dischtime"]), on="subject_id", how="left")
+    omr = omr.filter((pl.col("charttime") <= pl.col("prev_dischtime")) & (pl.col("charttime") >= pl.col("prev_edregtime")))
+    omr = omr.drop(["prev_edregtime", "prev_dischtime"])
     
     ### Requires reverting to pandas for string operations
     omr = omr.to_pandas()
@@ -443,9 +443,9 @@ def read_vitals_table(
     ### Prepare ed vital signs measures in long table format
     vitals = vitals.filter(pl.col("subject_id").is_in(admits_last.select("subject_id")))
     vitals = vitals.drop(["stay_id", "pain", "rhythm"])
-    vitals = vitals.join(admits_last.select(["subject_id", "edregtime"]), on="subject_id", how="left")
-    vitals = vitals.filter(pl.col("charttime") <= pl.col("edregtime"))
-    vitals = vitals.drop("edregtime")
+    vitals = vitals.join(admits_last.select(["subject_id", "prev_edregtime", "prev_dischtime"]), on="subject_id", how="left")
+    vitals = vitals.filter((pl.col("charttime") <= pl.col("prev_dischtime")) & (pl.col("charttime") >= pl.col("prev_edregtime")))
+    vitals = vitals.drop(["prev_edregtime", "prev_dischtime"])
     vitals = vitals.rename(vitalsign_column_map)
     vitals = vitals.melt(
         id_vars=["subject_id", "charttime"],
@@ -493,10 +493,11 @@ def read_labevents_table(
     labs_data = (labs_data.select(["subject_id", "charttime", "itemid", "label", "value", "valueuom"])
             .with_columns(charttime=pl.col("charttime").cast(pl.Datetime), linksto=pl.lit("labevents")))
     # get eligible lab tests prior to current episode
-    labs_data = labs_data.join(admits_last[['subject_id', 'edregtime']].lazy()
-                            .with_columns(edregtime=pl.col("edregtime").cast(pl.Datetime)), 
+    labs_data = labs_data.join(admits_last[["subject_id", "prev_edregtime", "prev_dischtime"]].lazy()
+                            .with_columns(prev_edregtime=pl.col("prev_edregtime").cast(pl.Datetime),
+                                          prev_dischtime=pl.col("prev_dischtime").cast(pl.Datetime)), 
                             how='left', on="subject_id")
-    labs_data = labs_data.filter(pl.col("charttime") <= pl.col("edregtime")).drop(["edregtime"])
+    labs_data = labs_data.filter((pl.col("charttime") <= pl.col("prev_dischtime")) & (pl.col("charttime") >= pl.col("prev_edregtime"))).drop(["prev_edregtime", "prev_dischtime"])
     # get most common items (sample file contains top 50 itemids)
     if include_items is not None:
         # read txt file containing list of ids

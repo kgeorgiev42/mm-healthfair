@@ -82,8 +82,14 @@ def get_final_episodes(stays: pl.DataFrame | pl.LazyFrame) -> pl.DataFrame:
         stays = stays.collect()
 
     ### Sort values and get final ED episode
-    stays = stays.sort(["subject_id", "edregtime"]).unique(subset=["subject_id"], keep="last")
-    return stays
+    ### Save second to last episode for validation
+    stays_final = stays.sort(["subject_id", "edregtime"]).unique(subset=["subject_id"], keep="last")
+    ### Get second-to-last episode for time-series collection
+    stays_second_last = stays.sort(["subject_id", "edregtime"]).filter(~pl.col("hadm_id").is_in(stays_final["hadm_id"]))
+    stays_second_last = stays.sort(["subject_id", "edregtime"]).unique(subset=["subject_id"], keep="last")
+    stays_second_last = stays_second_last.rename({"edregtime": "prev_edregtime", "dischtime": "prev_dischtime"}).select(["subject_id", "prev_edregtime", "prev_dischtime"])
+    stays_final = stays_final.join(stays_second_last, on="subject_id", how="left")
+    return stays_final
 
 def get_n_unique_values(
     table: pl.DataFrame | pl.LazyFrame, use_col: str = "subject_id"
