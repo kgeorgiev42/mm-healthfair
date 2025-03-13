@@ -162,7 +162,6 @@ vitals_freq = config["timeseries"]["vitals_freq"]
 lab_freq = config["timeseries"]["lab_freq"]
 ## Features to save within EHR data (not candidates for exclusion due to high correlation)
 feats_to_save = config["attributes"]["feats_to_save"]
-edregtime = ehr_data.select("edregtime")
 
 print("START TRAIN-VAL-TEST SPLIT")
 print("---------------------------------")
@@ -182,6 +181,8 @@ print("---------------------------------")
 if args.verbose:
     print("Preprocessing static EHR data for training..")
     ehr_data = encode_categorical_features(ehr_data)
+    ### Save edregtime for time-series processing
+    ehr_regtime = ehr_data.select(["subject_id", "edregtime"])
     ehr_data = extract_lookup_fields(ehr_data, lookup, lookup_output_path=args.output_reference_dir)
     ehr_data = remove_correlated_features(ehr_data, feats_to_save, threshold=args.corr_threshold, 
                                           method=args.corr_method,
@@ -194,7 +195,7 @@ print("---------------------------------")
 events = events.collect(streaming=True)
 # get all features expected for each event data source and set sampling freq
 print(f"Imputing missing values using strategy: {args.impute}")
-feature_dict = generate_interval_dataset(ehr_data, events, edregtime,
+feature_dict = generate_interval_dataset(ehr_data, events, ehr_regtime,
                                             vitals_freq, lab_freq,
                                             args.min_events, args.max_events,
                                             args.impute, args.include_dyn_mean, args.no_resample,

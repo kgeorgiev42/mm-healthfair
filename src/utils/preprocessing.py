@@ -4,6 +4,7 @@ import pandas as pd
 import spacy
 import json
 import os
+import torch
 from tqdm import tqdm
 from sklearn.model_selection import train_test_split
 from transformers import AutoModel, AutoTokenizer
@@ -433,17 +434,22 @@ def process_text_to_embeddings(notes: pl.DataFrame) -> dict:
 
     Args:
         notes (pl.DataFrame): Dataframe containing notes data.
+        use_gpu (bool): Whether to use GPU for inference. Defaults to False.
 
     Returns:
-        dict: Dictionary containing hadm_id as keys and average wode embeddings as values.
+        dict: Dictionary containing subject_id as keys and average word embeddings as values.
     """
     embeddings_dict = {}
 
-    nlp = spacy.load("en_core_sci_md")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")
+
+    nlp = spacy.load("en_core_sci_md", disable=["ner", "parser"])
+    nlp.add_pipe("sentencizer")
     tokenizer = AutoTokenizer.from_pretrained(
         "emilyalsentzer/Bio_Discharge_Summary_BERT"
     )
-    model = AutoModel.from_pretrained("emilyalsentzer/Bio_Discharge_Summary_BERT")
+    model = AutoModel.from_pretrained("emilyalsentzer/Bio_Discharge_Summary_BERT").to(device)
 
     for row in tqdm(
         notes.iter_rows(named=True),
@@ -457,25 +463,25 @@ def process_text_to_embeddings(notes: pl.DataFrame) -> dict:
         doc = nlp(text)
         sentences = [sent.text for sent in doc.sents]
 
-        # Generate embeddings for each sentence
-        sentence_embeddings = []
-        for sentence in sentences:
-            inputs = tokenizer(
-                sentence,
-                return_tensors="pt",
-                truncation=True,
-                padding=True,
-                max_length=128,
-            )
-            outputs = model(**inputs)
-            sentence_embeddings.append(
-                outputs.last_hidden_state.mean(dim=1).detach().numpy()
-            )
+        # Tokenize all sentences at once
+        inputs = tokenizer(
+            sentences,
+            return_tensors="pt",
+            truncation=True,
+            padding=True,
+            max_length=128,
+            return_attention_mask=False,
+        ).to(device)
 
-        if sentence_embeddings:
+        # Generate embeddings for all sentences in a single forward pass
+        with torch.no_grad():
+            outputs = model(**inputs)
+            sentence_embeddings = outputs.last_hidden_state.mean(dim=1).cpu().numpy()
+
+        if sentence_embeddings.size > 0:
             embeddings = np.mean(sentence_embeddings, axis=0)
         else:
-            embeddings = np.zeros((1, 768))  # Handle case with no sentences
+            embeddings = np.zeros((768,))  # Handle case with no sentences
 
         embeddings_dict[subj_id] = embeddings
 
@@ -582,7 +588,7 @@ def convert_events_to_timeseries(events: pl.DataFrame) -> pl.DataFrame:
     return timeseries
 
 def generate_interval_dataset(ehr_static: pl.DataFrame, ts_data: pl.DataFrame,
-                              edregtime: pl.Series,
+                              ehr_regtime: pl.DataFrame,
                               vitals_freq: str = "5h", lab_freq: str = "1h",
                               min_events: int = None, 
                               max_events: int = None,
@@ -614,12 +620,13 @@ def generate_interval_dataset(ehr_static: pl.DataFrame, ts_data: pl.DataFrame,
     min_events = 1 if min_events is None else int(min_events)
     max_events = 1e6 if max_events is None else int(max_events)
     print("Imputing event intervals per patient..")
-    
-    for pt_events in tqdm(
-        ts_data.partition_by("subject_id", include_key=True),
-        desc="Generating patient-level data...",
+    ts_data = ts_data.sort(by=["subject_id", "charttime"])
+    ehr_regtime = ehr_regtime.sort(by=["subject_id", "edregtime"])
+    for id_val in tqdm(ts_data.unique("subject_id").get_column("subject_id").to_list(),
+            desc="Generating patient-level data...",
     ):
-        id_val = pt_events["subject_id"][0]
+        pt_events = ts_data.filter(pl.col("subject_id") == id_val)
+        edregtime = ehr_regtime.filter(pl.col("subject_id") == id_val).select("edregtime").head(1).item()
         if pt_events.n_unique("linksto") < n_src:
             missing_event_src += 1
             continue
