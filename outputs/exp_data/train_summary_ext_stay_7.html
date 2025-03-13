@@ -1,0 +1,324 @@
+<table border="1" class="dataframe">
+  <thead>
+    <tr>
+      <th></th>
+      <th></th>
+      <th colspan="7" halign="left">Grouped by set</th>
+    </tr>
+    <tr>
+      <th></th>
+      <th></th>
+      <th>Missing</th>
+      <th>Overall</th>
+      <th>train</th>
+      <th>val</th>
+      <th>test</th>
+      <th>P-Value</th>
+      <th>Test</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <th>n</th>
+      <th></th>
+      <td></td>
+      <td>36058</td>
+      <td>28846</td>
+      <td>3606</td>
+      <td>3606</td>
+      <td></td>
+      <td></td>
+    </tr>
+    <tr>
+      <th>Age, median [Q1,Q3]</th>
+      <th></th>
+      <td>0</td>
+      <td>64.0 [50.0,77.0]</td>
+      <td>64.0 [50.0,77.0]</td>
+      <td>64.0 [51.0,76.0]</td>
+      <td>64.0 [50.2,77.0]</td>
+      <td>0.370</td>
+      <td>Kruskal-Wallis</td>
+    </tr>
+    <tr>
+      <th rowspan="2" valign="top">Gender, n (%)</th>
+      <th>F</th>
+      <td></td>
+      <td>18562 (51.5)</td>
+      <td>14850 (51.5)</td>
+      <td>1856 (51.5)</td>
+      <td>1856 (51.5)</td>
+      <td>1.000</td>
+      <td>Chi-squared</td>
+    </tr>
+    <tr>
+      <th>M</th>
+      <td></td>
+      <td>17496 (48.5)</td>
+      <td>13996 (48.5)</td>
+      <td>1750 (48.5)</td>
+      <td>1750 (48.5)</td>
+      <td></td>
+      <td></td>
+    </tr>
+    <tr>
+      <th rowspan="5" valign="top">Ethnicity, n (%)</th>
+      <th>Asian</th>
+      <td></td>
+      <td>1286 (3.6)</td>
+      <td>1029 (3.6)</td>
+      <td>127 (3.5)</td>
+      <td>130 (3.6)</td>
+      <td>1.000</td>
+      <td>Chi-squared</td>
+    </tr>
+    <tr>
+      <th>Black</th>
+      <td></td>
+      <td>6086 (16.9)</td>
+      <td>4868 (16.9)</td>
+      <td>608 (16.9)</td>
+      <td>610 (16.9)</td>
+      <td></td>
+      <td></td>
+    </tr>
+    <tr>
+      <th>Hispanic/Latino</th>
+      <td></td>
+      <td>2068 (5.7)</td>
+      <td>1655 (5.7)</td>
+      <td>207 (5.7)</td>
+      <td>206 (5.7)</td>
+      <td></td>
+      <td></td>
+    </tr>
+    <tr>
+      <th>Other</th>
+      <td></td>
+      <td>1225 (3.4)</td>
+      <td>981 (3.4)</td>
+      <td>123 (3.4)</td>
+      <td>121 (3.4)</td>
+      <td></td>
+      <td></td>
+    </tr>
+    <tr>
+      <th>White</th>
+      <td></td>
+      <td>25393 (70.4)</td>
+      <td>20313 (70.4)</td>
+      <td>2541 (70.5)</td>
+      <td>2539 (70.4)</td>
+      <td></td>
+      <td></td>
+    </tr>
+    <tr>
+      <th rowspan="4" valign="top">Insurance, n (%)</th>
+      <th>Medicaid</th>
+      <td></td>
+      <td>6209 (17.2)</td>
+      <td>4969 (17.2)</td>
+      <td>609 (16.9)</td>
+      <td>631 (17.5)</td>
+      <td>0.893</td>
+      <td>Chi-squared</td>
+    </tr>
+    <tr>
+      <th>Medicare</th>
+      <td></td>
+      <td>21216 (58.8)</td>
+      <td>16977 (58.9)</td>
+      <td>2113 (58.6)</td>
+      <td>2126 (59.0)</td>
+      <td></td>
+      <td></td>
+    </tr>
+    <tr>
+      <th>Other</th>
+      <td></td>
+      <td>658 (1.8)</td>
+      <td>532 (1.8)</td>
+      <td>69 (1.9)</td>
+      <td>57 (1.6)</td>
+      <td></td>
+      <td></td>
+    </tr>
+    <tr>
+      <th>Private</th>
+      <td></td>
+      <td>7975 (22.1)</td>
+      <td>6368 (22.1)</td>
+      <td>815 (22.6)</td>
+      <td>792 (22.0)</td>
+      <td></td>
+      <td></td>
+    </tr>
+    <tr>
+      <th rowspan="4" valign="top">Marital status, n (%)</th>
+      <th>Divorced</th>
+      <td></td>
+      <td>3030 (8.4)</td>
+      <td>2413 (8.4)</td>
+      <td>306 (8.5)</td>
+      <td>311 (8.6)</td>
+      <td>0.755</td>
+      <td>Chi-squared</td>
+    </tr>
+    <tr>
+      <th>Married</th>
+      <td></td>
+      <td>14897 (41.3)</td>
+      <td>11970 (41.5)</td>
+      <td>1475 (40.9)</td>
+      <td>1452 (40.3)</td>
+      <td></td>
+      <td></td>
+    </tr>
+    <tr>
+      <th>Single</th>
+      <td></td>
+      <td>12289 (34.1)</td>
+      <td>9827 (34.1)</td>
+      <td>1231 (34.1)</td>
+      <td>1231 (34.1)</td>
+      <td></td>
+      <td></td>
+    </tr>
+    <tr>
+      <th>Widowed</th>
+      <td></td>
+      <td>5842 (16.2)</td>
+      <td>4636 (16.1)</td>
+      <td>594 (16.5)</td>
+      <td>612 (17.0)</td>
+      <td></td>
+      <td></td>
+    </tr>
+    <tr>
+      <th rowspan="2" valign="top">In-hospital death, n (%)</th>
+      <th>N</th>
+      <td></td>
+      <td>32951 (91.4)</td>
+      <td>26344 (91.3)</td>
+      <td>3289 (91.2)</td>
+      <td>3318 (92.0)</td>
+      <td>0.354</td>
+      <td>Chi-squared</td>
+    </tr>
+    <tr>
+      <th>Y</th>
+      <td></td>
+      <td>3107 (8.6)</td>
+      <td>2502 (8.7)</td>
+      <td>317 (8.8)</td>
+      <td>288 (8.0)</td>
+      <td></td>
+      <td></td>
+    </tr>
+    <tr>
+      <th rowspan="2" valign="top">Extended stay, n (%)</th>
+      <th>N</th>
+      <td></td>
+      <td>26582 (73.7)</td>
+      <td>21265 (73.7)</td>
+      <td>2659 (73.7)</td>
+      <td>2658 (73.7)</td>
+      <td>1.000</td>
+      <td>Chi-squared</td>
+    </tr>
+    <tr>
+      <th>Y</th>
+      <td></td>
+      <td>9476 (26.3)</td>
+      <td>7581 (26.3)</td>
+      <td>947 (26.3)</td>
+      <td>948 (26.3)</td>
+      <td></td>
+      <td></td>
+    </tr>
+    <tr>
+      <th rowspan="2" valign="top">Non-home discharge, n (%)</th>
+      <th>N</th>
+      <td></td>
+      <td>30676 (85.1)</td>
+      <td>24560 (85.1)</td>
+      <td>3075 (85.3)</td>
+      <td>3041 (84.3)</td>
+      <td>0.410</td>
+      <td>Chi-squared</td>
+    </tr>
+    <tr>
+      <th>Y</th>
+      <td></td>
+      <td>5382 (14.9)</td>
+      <td>4286 (14.9)</td>
+      <td>531 (14.7)</td>
+      <td>565 (15.7)</td>
+      <td></td>
+      <td></td>
+    </tr>
+    <tr>
+      <th rowspan="2" valign="top">ICU admission, n (%)</th>
+      <th>N</th>
+      <td></td>
+      <td>30769 (85.3)</td>
+      <td>24634 (85.4)</td>
+      <td>3091 (85.7)</td>
+      <td>3044 (84.4)</td>
+      <td>0.228</td>
+      <td>Chi-squared</td>
+    </tr>
+    <tr>
+      <th>Y</th>
+      <td></td>
+      <td>5289 (14.7)</td>
+      <td>4212 (14.6)</td>
+      <td>515 (14.3)</td>
+      <td>562 (15.6)</td>
+      <td></td>
+      <td></td>
+    </tr>
+    <tr>
+      <th rowspan="2" valign="top">Multimorbidity, n (%)</th>
+      <th>N</th>
+      <td></td>
+      <td>7102 (19.7)</td>
+      <td>5666 (19.6)</td>
+      <td>741 (20.5)</td>
+      <td>695 (19.3)</td>
+      <td>0.347</td>
+      <td>Chi-squared</td>
+    </tr>
+    <tr>
+      <th>Y</th>
+      <td></td>
+      <td>28956 (80.3)</td>
+      <td>23180 (80.4)</td>
+      <td>2865 (79.5)</td>
+      <td>2911 (80.7)</td>
+      <td></td>
+      <td></td>
+    </tr>
+    <tr>
+      <th rowspan="2" valign="top">Complex multimorbidity, n (%)</th>
+      <th>N</th>
+      <td></td>
+      <td>19732 (54.7)</td>
+      <td>15802 (54.8)</td>
+      <td>1978 (54.9)</td>
+      <td>1952 (54.1)</td>
+      <td>0.751</td>
+      <td>Chi-squared</td>
+    </tr>
+    <tr>
+      <th>Y</th>
+      <td></td>
+      <td>16326 (45.3)</td>
+      <td>13044 (45.2)</td>
+      <td>1628 (45.1)</td>
+      <td>1654 (45.9)</td>
+      <td></td>
+      <td></td>
+    </tr>
+  </tbody>
+</table>

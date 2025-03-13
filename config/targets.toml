@@ -6,7 +6,7 @@ display = ['In-hospital Death', 'Extended Hospital Stay', 'Non-home Discharge', 
 labels = ['gender', 'race_group', 'marital_status', 'insurance']
 display = ['Sex', 'Ethnicity', 'Marital Status', 'Insurance']
 nonnormal = ['Age', '# historical discharge notes', '# Raw Input Tokens', '# Processed Input Tokens']
-lookup = ['hadm_id', 'yob', 'dod', 'admittime', 'dischtime', 'deathtime', 'edregtime', 'edouttime', 'admission_location', 'discharge_location', 'los_days', 'icu_los_days', 'ltc_code', 'num_summaries', 'num_input_tokens', 'num_target_tokens', 'num_measures', 'total_proc_count']
+lookup = ['hadm_id', 'yob', 'dod', 'admittime', 'dischtime', 'deathtime', 'edregtime', 'edouttime', 'intime', 'outtime', 'admission_location', 'discharge_location', 'los_days', 'icu_los_days', 'ltc_code', 'num_summaries', 'num_input_tokens', 'num_target_tokens', 'num_measures', 'total_proc_count']
 feats_to_save = ['anchor_age', 'gender_F', 'race_group_Hispanic_Latino', 'race_group_Black', 'race_group_White', 'race_group_Asian', 'race_group_Other', 'marital_status_Married', 'marital_status_Single', 'marital_status_Widowed', 'marital_status_Divorced', 'insurance_Medicare', 'insurance_Medicaid', 'insurance_Private', 'insurance_Other', 'in_hosp_death', 'ext_stay_7', 'icu_admission', 'non_home_discharge']
 categorical = []
 
@@ -15,5 +15,5 @@ bins = [18, 49, 59, 69, 79, 91]
 labels = ['<50', '50-59', '60-69', '70-79', '80+']
 
 [timeseries]
-vital_freq = '30m'
+vitals_freq = '1h'
 lab_freq = '5h'

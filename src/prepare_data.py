@@ -31,18 +31,21 @@ parser.add_argument(
     "--output_dir",
     "-o",
     type=str,
+    default="../outputs/processed_data",
     help="Directory to save processed training ids and pkl files.",
 )
 parser.add_argument(
     "--output_summary_dir",
     "-s",
     type=str,
+    default="../outputs/exp_data",
     help="Directory to save summary table file for training/val/test split.",
 )
 parser.add_argument(
     "--output_reference_dir",
     "-r",
     type=str,
+    default="../outputs/reference",
     help="Directory to save lookup table file containing dates and additional fields from EHR data.",
 )
 parser.add_argument(
@@ -104,7 +107,7 @@ parser.add_argument(
     help="Ratio of training data to create split.",
 )
 parser.add_argument(
-    "--stratify", type=bool, default=True, help="Whether to stratify the split by outcome and sensitive attributes."
+    "--stratify", action="store_true", default=True, help="Whether to stratify the split by outcome and sensitive attributes."
 )
 parser.add_argument(
     "--seed", type=int, default=0, help="Seed for random sampling. Defaults to 0."
@@ -137,9 +140,16 @@ elif not os.path.exists(output_dir):
 
 print(f"Reading pre-extracted data from {args.data_dir}...")
 # Read extracted data
-ehr_data = pl.read_csv(os.path.join(args.data_dir, "ehr_static.csv"))
-if args.include_events and os.path.exists(os.path.join(args.data_dir, "events_ts.csv")):
+if os.path.exists(os.path.join(args.data_dir, "ehr_static.csv")):
+    ehr_data = pl.read_csv(os.path.join(args.data_dir, "ehr_static.csv"), try_parse_dates=True)
+else:
+    print(f"No EHR data found under {args.data_dir}. Exiting..")
+    sys.exit()
+if os.path.exists(os.path.join(args.data_dir, "events_ts.csv")):
     events = pl.scan_csv(os.path.join(args.data_dir, "events_ts.csv"), try_parse_dates=True)
+else:
+    print(f"No time-series data found under {args.data_dir}. Exiting..")
+    sys.exit()
 if args.include_notes and os.path.exists(os.path.join(args.data_dir, "notes.csv")):
     notes = pl.scan_csv(os.path.join(args.data_dir, "notes.csv"))
 
@@ -148,11 +158,14 @@ print("Splitting data into training, validation and test sets..")
 config = toml.load(args.config)
 outcomes = config["outcomes"]["labels"]
 lookup = config["attributes"]["lookup"]
-vitals_freq = config["attributes"]["vitals_freq"]
-lab_freq = config["attributes"]["lab_freq"]
+vitals_freq = config["timeseries"]["vitals_freq"]
+lab_freq = config["timeseries"]["lab_freq"]
 ## Features to save within EHR data (not candidates for exclusion due to high correlation)
 feats_to_save = config["attributes"]["feats_to_save"]
-edregtime = ehr_data.select("edregtime").cast(pl.Datetime).item()
+edregtime = ehr_data.select("edregtime")
+
+print("START TRAIN-VAL-TEST SPLIT")
+print("---------------------------------")
 #### TRAIN-VAL-TEST SPLIT ####
 for outcome in outcomes:
     print(f"Processing splits for outcome: {outcome}")
@@ -160,9 +173,11 @@ for outcome in outcomes:
                                 args.seed, args.train_ratio, (1 - args.train_ratio)/2, 
                                 (1 - args.train_ratio)/2, stratify=args.stratify,
                                 verbose=args.verbose)
-
+print("---------------------------------")
 print("Finished train/val/test split creation.")
-    
+print("---------------------------------")
+print("START STATIC DATA PREPROCESSING")
+print("---------------------------------")
 #### STATIC DATA PREPROCESSING ####
 if args.verbose:
     print("Preprocessing static EHR data for training..")
@@ -171,20 +186,23 @@ if args.verbose:
     ehr_data = remove_correlated_features(ehr_data, feats_to_save, threshold=args.corr_threshold, 
                                           method=args.corr_method,
                                           verbose=args.verbose)
+print("---------------------------------")
 #### TIMESERIES PREPROCESSING ####
-print("Preprocessing time-series data for training..")
+print("START TIME-SERIES DATA PREPROCESSING")
+print("---------------------------------")
 # collect events
 events = events.collect(streaming=True)
 # get all features expected for each event data source and set sampling freq
 print(f"Imputing missing values using strategy: {args.impute}")
-feature_dict = generate_interval_dataset(ehr_data, events, 
-                                            args.vitals_freq, args.lab_freq,
-                                            edregtime, args.min_events, args.max_events,
+feature_dict = generate_interval_dataset(ehr_data, events, edregtime,
+                                            vitals_freq, lab_freq,
+                                            args.min_events, args.max_events,
                                             args.impute, args.include_dyn_mean, args.no_resample,
                                             args.max_elapsed, args.verbose)
-    
+print("---------------------------------")
 #### NOTES PREPROCESSING ###
 if args.include_notes:
+    print("START NOTES DATA PREPROCESSING")
     if args.verbose:
         print("Parsing discharge notes features from BHC segment..")
     notes = notes.select(["subject_id", "target"]).cast(
@@ -204,7 +222,7 @@ if args.include_notes:
     for k,v in feature_dict.items():
         id_val = v["subject_id"]
         feature_dict[id_val]["notes"] = embeddings[id_val]
-
+print("---------------------------------")
 # Preview example data
 #example_id = list(data_dict.keys())[-1]
 #print(f"Example data:\n\t{data_dict[example_id]}")

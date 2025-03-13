@@ -218,6 +218,9 @@ def get_train_split_summary(train: pd.DataFrame,
                                 'is_multimorbid': 'Multimorbidity',
                                 'is_complex_multimorbid': 'Complex multimorbidity'
                             },
+                            cat_cols = ['In-hospital death','Extended stay',
+                                'Non-home discharge','ICU admission',
+                                'Multimorbidity','Complex multimorbidity'],
                             verbose: bool=True) -> None:
     
     """Helper function to print statistical train-validation-test split summary."""
@@ -225,10 +228,13 @@ def get_train_split_summary(train: pd.DataFrame,
         print(f'Saving demographic summary for training split of outcome {outcome}.')
     samples = pd.concat([train, val, test], axis=0)
     samples_disp = samples.rename(columns=disp_dict)
-    sum_table = TableOne(samples_disp, [col for col in disp_dict.keys()],
-                         categorical=[col for col in disp_dict.keys() if col not in cont_cols],
+    for col in cat_cols:
+        samples_disp[col] = samples_disp[col].replace({0: 'N', 1: 'Y'})
+    sum_table = TableOne(samples_disp, [col for col in disp_dict.values()],
+                         order={'set': ['train', 'val', 'test']},
+                         categorical=[col for col in disp_dict.values() if col not in cont_cols],
                          overall=True, groupby='set', pval=True, htest_name=True,
-                         tukey_test=True, nonormal=nn_cols)
+                         tukey_test=True, nonnormal=nn_cols)
     sum_table.to_html(os.path.join(output_path, f'train_summary_{outcome}.html'))
     if verbose:
         print(f'Saved {outcome} summary to {output_path}/train_summary_{outcome}.html.')
