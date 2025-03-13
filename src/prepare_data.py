@@ -3,35 +3,69 @@ import glob
 import os
 import pickle
 import sys
+import toml
 
 import polars as pl
 from tqdm import tqdm
-from utils.functions import scale_numeric_features
+from utils.functions import save_pickle
 from utils.preprocessing import (
-    add_time_elapsed_to_events,
-    clean_events,
     clean_notes,
-    convert_events_to_timeseries,
     encode_categorical_features,
     process_text_to_embeddings,
+    generate_train_val_test_set,
+    remove_correlated_features,
+    extract_lookup_fields,
+    encode_categorical_features,
+    generate_interval_dataset
 )
 
 parser = argparse.ArgumentParser(
-    description="Preprocess data - generates pkl file to use for training."
+    description="Preprocess multimodal MIMIC-IV data for training."
 )
 parser.add_argument(
     "data_dir",
     type=str,
-    help="Directory containing processed data, will be used to output processed pkl file.",
+    help="Directory containing processed data from extract_data.py.",
 )
 parser.add_argument(
     "--output_dir",
     "-o",
     type=str,
-    help="Directory to save processed dictionary file and outputs.",
+    help="Directory to save processed training ids and pkl files.",
 )
 parser.add_argument(
-    "--min_events", type=int, default=2, help="Minimum number of events per stay."
+    "--output_summary_dir",
+    "-s",
+    type=str,
+    help="Directory to save summary table file for training/val/test split.",
+)
+parser.add_argument(
+    "--output_reference_dir",
+    "-r",
+    type=str,
+    help="Directory to save lookup table file containing dates and additional fields from EHR data.",
+)
+parser.add_argument(
+    "--config",
+    "-c",
+    type=str,
+    help="Path to config toml file containing lookup fields for grouping.",
+    default="../config/targets.toml",
+)
+parser.add_argument(
+    "--corr_threshold",
+    type=float,
+    default=0.90,
+    help="Threshold for removing correlated features. Features with correlation above this value will be removed.",
+)
+parser.add_argument(
+    "--corr_method",
+    type=str,
+    default='pearson',
+    help="Method for removing correlated features. Defaults to Pearson correlation.",
+)
+parser.add_argument(
+    "--min_events", type=int, default=2, help="Minimum number of events per patient."
 )
 parser.add_argument(
     "--max_events", type=int, default=None, help="Maximum number of events per stay."
@@ -41,9 +75,6 @@ parser.add_argument(
     type=str,
     default=None,
     help="Impute strategy. One of ['forward', 'backward', 'mask', 'value' or None]",
-)
-parser.add_argument(
-    "--no_scale", action="store_true", help="Flag to turn off feature scaling."
 )
 parser.add_argument(
     "--no_resample",
@@ -58,7 +89,7 @@ parser.add_argument(
 parser.add_argument(
     "--max_elapsed",
     type=int,
-    default=48,
+    default=72,
     help="Max time elapsed from hospital admission (hours). Filters any events that occur after this.",
 )
 parser.add_argument(
@@ -66,13 +97,24 @@ parser.add_argument(
     action="store_true",
     help="Whether to preprocess notes if available.",
 )
+parser.add_argument(
+    "--train_ratio",
+    type=float,
+    default=0.8,
+    help="Ratio of training data to create split.",
+)
+parser.add_argument(
+    "--stratify", type=bool, default=True, help="Whether to stratify the split by outcome and sensitive attributes."
+)
+parser.add_argument(
+    "--seed", type=int, default=0, help="Seed for random sampling. Defaults to 0."
+)
 parser.add_argument("--verbose", "-v", action="store_true", help="Verbosity.")
-
 args = parser.parse_args()
 output_dir = args.data_dir if args.output_dir is None else args.output_dir
 
 print(
-    f"Processing data from {args.data_dir} and saving output files to {output_dir}..."
+    f"Processing data from {args.data_dir}..."
 )
 
 # If pkl file exists then remove and start over
@@ -93,271 +135,80 @@ elif not os.path.exists(output_dir):
     print(f"Creating directory at {output_dir}...")
     os.makedirs(output_dir)
 
+print(f"Reading pre-extracted data from {args.data_dir}...")
 # Read extracted data
-stays = pl.scan_csv(os.path.join(args.data_dir, "stays.csv"))
-events = pl.scan_csv(os.path.join(args.data_dir, "events.csv"), try_parse_dates=True)
-
-# Check if notes exists if so read csv
-if os.path.exists(os.path.join(args.data_dir, "notes.csv")) and args.include_notes:
-    with_notes = True
+ehr_data = pl.read_csv(os.path.join(args.data_dir, "ehr_static.csv"))
+if args.include_events and os.path.exists(os.path.join(args.data_dir, "events_ts.csv")):
+    events = pl.scan_csv(os.path.join(args.data_dir, "events_ts.csv"), try_parse_dates=True)
+if args.include_notes and os.path.exists(os.path.join(args.data_dir, "notes.csv")):
     notes = pl.scan_csv(os.path.join(args.data_dir, "notes.csv"))
-else:
-    with_notes = False
 
+#### TRAIN-VAL-TEST SPLIT ####
+print("Splitting data into training, validation and test sets..")
+config = toml.load(args.config)
+outcomes = config["outcomes"]["labels"]
+lookup = config["attributes"]["lookup"]
+vitals_freq = config["attributes"]["vitals_freq"]
+lab_freq = config["attributes"]["lab_freq"]
+## Features to save within EHR data (not candidates for exclusion due to high correlation)
+feats_to_save = config["attributes"]["feats_to_save"]
+edregtime = ehr_data.select("edregtime").cast(pl.Datetime).item()
+#### TRAIN-VAL-TEST SPLIT ####
+for outcome in outcomes:
+    print(f"Processing splits for outcome: {outcome}")
+    generate_train_val_test_set(ehr_data, args.output_dir, outcome, args.output_summary_dir,
+                                args.seed, args.train_ratio, (1 - args.train_ratio)/2, 
+                                (1 - args.train_ratio)/2, stratify=args.stratify,
+                                verbose=args.verbose)
+
+print("Finished train/val/test split creation.")
+    
 #### STATIC DATA PREPROCESSING ####
-
-metadata = stays.collect()
-
-static_features = [
-    "anchor_age",
-    "gender",
-    "race",
-    "marital_status",
-    "insurance",
-    "los",
-    "los_ed",
-]
-
-# Select features of interest only
-static_data = metadata.select(["hadm_id"] + static_features).cast(
-    {"los": pl.Float64, "los_ed": pl.Float64}
-)
-
-# Applies min max scaling to  numerical features
-numeric_cols = ["anchor_age", "height", "weight", "los_ed"]
-
-if not args.no_scale:
-    static_data = scale_numeric_features(
-        static_data, numeric_cols=[i for i in static_data.columns if i in numeric_cols]
-    )
-static_data = encode_categorical_features(static_data)
-
-#### NOTES PREPROCESSING ###
-
-if with_notes:
-    notes = notes.select(["hadm_id", "charttime", "text"]).cast(
-        {"hadm_id": pl.Int64, "charttime": pl.Datetime, "text": pl.String}
-    )
-    # Extract specific section of notes "Brief Hospital Course"
-    # Drops ~3k missing the section entirely
-    notes = notes.with_columns(
-        (pl.col("text").str.find("History of Present Illness:")).alias("begin")
-    ).drop_nulls(subset="begin")
-    # Get the end
-    # Drops any remaining where the end cant be found (~450)
-    notes = notes.with_columns(
-        (
-            pl.col("text")
-            .str.slice(pl.col("begin"))
-            .str.find("\n \nPast Medical History")
-        ).alias("end")
-    ).drop_nulls(subset="end")
-
-    # Get subsection
-    # NOTE: This is not perfect and in some cases snippet may contain text from other preceding sections
-
-    notes = notes.with_columns(
-        subtext=pl.col("text").str.slice(pl.col("begin") + 27, pl.col("end"))
-    ).drop(["text", "begin", "end"])
-
-    # Clean notes by removing "___" identifiers
-    notes = clean_notes(notes).collect(streaming=True)
-
-    # Generate embeddings
-    embeddings = process_text_to_embeddings(notes)
-
+if args.verbose:
+    print("Preprocessing static EHR data for training..")
+    ehr_data = encode_categorical_features(ehr_data)
+    ehr_data = extract_lookup_fields(ehr_data, lookup, lookup_output_path=args.output_reference_dir)
+    ehr_data = remove_correlated_features(ehr_data, feats_to_save, threshold=args.corr_threshold, 
+                                          method=args.corr_method,
+                                          verbose=args.verbose)
 #### TIMESERIES PREPROCESSING ####
-
-# clean events
-events = clean_events(events)
-
+print("Preprocessing time-series data for training..")
 # collect events
 events = events.collect(streaming=True)
-
-# scale values from events data
-if not args.no_scale:
-    events = scale_numeric_features(events, ["value"], over="label")
-
-### CREATE DICTIONARY DATA
-
-data_dict = {}
-
-# Filter events by number of events per stay
-min_events = 1 if args.min_events is None else int(args.min_events)
-max_events = 1e6 if args.max_events is None else int(args.max_events)
-
-# get number of different event sources
-n_src = events.n_unique("linksto")
-
-# Loop over events per stay to generate a key-data structure
-print(f"Imputing missing values using strategy: {args.impute}")
-n = 0
-filter_by_nb_events = 0
-missing_event_src = 0
-filter_by_elapsed_time = 0
-missing_notes = 0
-
 # get all features expected for each event data source and set sampling freq
-feature_map = {}
-freq = {}
-for src in events.unique("linksto").get_column("linksto").to_list():
-    feature_map[src] = sorted(
-        events.filter(pl.col("linksto") == src)
-        .unique("label")
-        .get_column("label")
-        .to_list()
+print(f"Imputing missing values using strategy: {args.impute}")
+feature_dict = generate_interval_dataset(ehr_data, events, 
+                                            args.vitals_freq, args.lab_freq,
+                                            edregtime, args.min_events, args.max_events,
+                                            args.impute, args.include_dyn_mean, args.no_resample,
+                                            args.max_elapsed, args.verbose)
+    
+#### NOTES PREPROCESSING ###
+if args.include_notes:
+    if args.verbose:
+        print("Parsing discharge notes features from BHC segment..")
+    notes = notes.select(["subject_id", "target"]).cast(
+        {"subject_id": pl.Int64, "target": pl.String}
     )
-    freq[src] = "30m" if src == "vitalsign" else "5h"
-
-
-for stay_events in tqdm(
-    events.partition_by("hadm_id", include_key=True),
-    desc="Generating stay-level data...",
-):
-    id_val = stay_events["hadm_id"][0]
-
-    # Get static data for stay
-    stay_static = static_data.filter(pl.col("hadm_id") == id_val).drop("hadm_id")
-
-    if stay_static.shape[0] == 0:
-        # skip if not in stays
-        continue
-
-    # Get metadata (unprocessed static data)
-    stay_metadata = metadata.filter(pl.col("hadm_id") == id_val)
-
-    admittime = stay_metadata.select("admittime").cast(pl.Datetime).item()
-
-    if with_notes:
-        dischtime = stay_metadata.select("dischtime").cast(pl.Datetime).item()
-
-        # Get discharge notes relating to hospital stay
-        stay_notes = notes.filter(pl.col("hadm_id") == id_val).drop("hadm_id")
-
-        # Ensure that notes are charted during hospital stay
-        # TODO: Change to first x hours after admission??
-        stay_notes = stay_notes.filter(
-            (pl.col("charttime") >= admittime) & (pl.col("charttime") <= dischtime)
-        )
-
-        if stay_notes.shape[0] == 0:
-            missing_notes += 1
-            # skip if no notes for stay or within hospital stay
-            continue
-
-    # filter if not at least one entry from each event data source
-    if stay_events.n_unique("linksto") < n_src:
-        missing_event_src += 1
-        continue
-
-    write_data = True
-    ts_data = []
-    for events_by_src in stay_events.partition_by("linksto"):
-        src = events_by_src.select(pl.first("linksto")).item()
-
-        # Convert event data to timeseries
-        timeseries = convert_events_to_timeseries(events_by_src)
-
-        if (timeseries.shape[0] < min_events) | (timeseries.shape[0] > max_events):
-            filter_by_nb_events += 1
-            write_data = False
-            break
-
-        features = feature_map[src]
-        # Ensure models have the same number of features
-        missing_cols = [x for x in features if x not in timeseries.columns]
-        # create empty columns for missing features
-        timeseries = timeseries.with_columns(
-            [pl.lit(None, dtype=pl.Float64).alias(c) for c in missing_cols]
-        )
-
-        # Impute missing values
-        if args.impute is not None:
-            # TODO: Consider using mean value for missing static data such as height and weight rather than constant?
-
-            if args.impute == "mask":
-                # Add new mask columns for whether row is nan or not
-                timeseries = timeseries.with_columns(
-                    [pl.col(f).is_null().alias(f + "_isna") for f in features]
-                )
-                stay_static = stay_static.with_columns(
-                    [
-                        pl.col(f).is_null().alias(f + "_isna")
-                        for f in stay_static.columns
-                    ]
-                )
-
-            elif (args.impute == "forward") | (args.impute == "backward"):
-                # Fill missing values using forward fill
-                timeseries = timeseries.fill_null(strategy=args.impute)
-
-                # for remaining null values use fixed value
-                timeseries = timeseries.fill_null(value=-1)
-                stay_static = stay_static.fill_null(value=-1)
-
-            elif args.impute == "value":
-                timeseries = timeseries.fill_null(value=-1)
-                stay_static = stay_static.fill_null(value=-1)
-
-            else:
-                raise ValueError(
-                    "impute_strategy must be one of [None, mask, value, forward, backward]"
-                )
-
-        if args.include_dyn_mean:
-            # Option to get mean value during stay (drop time col)
-            timeseries_mean = timeseries.drop(["charttime", "linksto"]).mean()
-            timeseries_mean = timeseries_mean.with_columns(pl.all().round(3))
-            # Add to static data
-            stay_static = stay_static.hstack(timeseries_mean)
-
-        if not args.no_resample:
-            # Upsample and then downsample to create regular intervals e.g., 2-hours
-            timeseries = timeseries.upsample(time_column="charttime", every="1m")
-            timeseries = timeseries.group_by_dynamic(
-                "charttime",
-                every=freq[src],
-            ).agg(pl.col(pl.Float64).mean())
-            timeseries = timeseries.fill_null(strategy="forward")
-
-        timeseries = add_time_elapsed_to_events(timeseries, admittime)
-        # only include first x hours - note this could lead to all data being lost so skip if that is the case
-        timeseries = timeseries.filter(pl.col("elapsed") <= args.max_elapsed)
-
-        if timeseries.shape[0] == 0:
-            filter_by_elapsed_time += 1
-            write_data = False
-            break
-
-        timeseries = timeseries.select(features)
-
-        ts_data.append(timeseries)
-
-    if write_data:
-        data_dict[id_val] = {}
-        data_dict[id_val]["static"] = stay_static
-
-        for idx, ts in enumerate(ts_data):
-            data_dict[id_val][f"dynamic_{idx}"] = ts
-
-        if with_notes:
-            data_dict[id_val]["notes"] = embeddings[id_val]
-        n += 1
-
-    write_data = True
-
-print(f"SUCCESSFULLY PROCESSED DATA FOR {n} STAYS.")
-print(f"SKIPPING {filter_by_nb_events} STAYS DUE TO TOTAL NUM EVENTS.")
-print(f"SKIPPING {missing_event_src} STAYS DUE TO MISSING EVENT SOURCE.")
-print(f"SKIPPING {filter_by_elapsed_time} STAYS DUE TO FILTER ON ELAPSED TIME.")
-if with_notes:
-    print(f"SKIPPING {missing_notes} STAYS DUE TO MISSING NOTES.")
+    # Clean notes by removing "___" identifiers
+    if args.verbose:
+        print("Cleaning discharge notes from extra identifiers..")
+    notes = clean_notes(notes).collect(streaming=True)
+    # Generate embeddings
+    if args.verbose:
+        print("Generating sentence-level embeddings for discharge notes..")
+    embeddings = process_text_to_embeddings(notes)
+    # Add embeddings to feature dictionary
+    if args.verbose:
+        print("Appending embeddings to feature dictionary..")
+    for k,v in feature_dict.items():
+        id_val = v["subject_id"]
+        feature_dict[id_val]["notes"] = embeddings[id_val]
 
 # Preview example data
-example_id = list(data_dict.keys())[-1]
-print(f"Example data:\n\t{data_dict[example_id]}")
-
+#example_id = list(data_dict.keys())[-1]
+#print(f"Example data:\n\t{data_dict[example_id]}")
+print(f"Feature preparation successful. Exporting prepared features to {output_dir}..")
 # Save dictionary to disk
-with open(os.path.join(output_dir, "processed_data.pkl"), "wb") as f:
-    pickle.dump(data_dict, f)
-print("Finished.")
+save_pickle(feature_dict, output_dir, "processed_data.pkl")
+print("Finished feature preparation for multimodal learning.")

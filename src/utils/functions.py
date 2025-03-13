@@ -20,6 +20,19 @@ def load_pickle(filepath: str) -> Any:
         data = pickle.load(f)
     return data
 
+def save_pickle(target: dict, filepath: str,
+                fname: str="processed_data.pkl") -> Any:
+    """Save a pickled object from a dictionary.
+
+    Args:
+        filepath (str): Path to pickle (.pkl) file.
+
+    Returns:
+        Any: Loaded object.
+    """
+    with open(os.path.join(filepath, fname), "wb") as f:
+        pickle.dump(target, f)
+
 
 def impute_from_df(
     impute_to: pl.DataFrame | pl.LazyFrame,
@@ -218,7 +231,7 @@ def get_train_split_summary(train: pd.DataFrame,
                          tukey_test=True, nonormal=nn_cols)
     sum_table.to_html(os.path.join(output_path, f'train_summary_{outcome}.html'))
     if verbose:
-        print(f'Saved to train_summary_{outcome}.html.')
+        print(f'Saved {outcome} summary to {output_path}/train_summary_{outcome}.html.')
 
 
 def rename_fields(col):

@@ -275,6 +275,7 @@ def extract_lookup_fields(ehr_data: pl.DataFrame,
     """
     ehr_lookup = ehr_data.select(['subject_id'] + lookup_list)
     ehr_data = ehr_data.drop(lookup_list)
+    print(f'Saving lookup fields in EHR data to {lookup_output_path}')
     ehr_lookup.write_csv(os.path.join(lookup_output_path, 'ehr_lookup.csv'))
     return ehr_data
 
@@ -330,7 +331,7 @@ def remove_correlated_features(ehr_data: pl.DataFrame,
     return ehr_data
 
 def generate_train_val_test_set(ehr_data: pl.DataFrame,
-                                output_path: str = '../outputs/prep_data',
+                                output_path: str = '../outputs/processed_data',
                                 outcome_col: str = 'in_hosp_death',
                                 output_summary_path: str = '../outputs/exp_data',
                                 seed: int = 0,
@@ -372,15 +373,23 @@ def generate_train_val_test_set(ehr_data: pl.DataFrame,
                                   ehr_data['insurance']], axis=1)
         split_target = ehr_data.drop([outcome_col, 'Sex', 'race_group', 
                                       'marital_status', 'insurance'], axis=1)
-    ### Generate split dataframes
-    train_x, test_x, train_y, test_y = train_test_split(split_target, strat_target, 
-                                                        test_size=test_ratio, 
-                                                        random_state=seed, 
+        ### Generate split dataframes
+        train_x, test_x, train_y, test_y = train_test_split(split_target, strat_target, 
+                                                            test_size=test_ratio, 
+                                                            random_state=seed, 
+                                                            stratify=strat_target)
+        train_x, val_x, train_y, val_y = train_test_split(split_target, strat_target,
+                                                        test_size=val_ratio/(train_ratio+val_ratio),
+                                                        random_state=seed,
                                                         stratify=strat_target)
-    train_x, val_x, train_y, val_y = train_test_split(split_target, strat_target,
-                                                    test_size=val_ratio/(train_ratio+val_ratio),
-                                                    random_state=seed,
-                                                    stratify=strat_target)
+    else:
+        train_x, test_x, train_y, test_y = train_test_split(ehr_data.drop([outcome_col], axis=1), ehr_data[outcome_col], 
+                                                            test_size=test_ratio, 
+                                                            random_state=seed)
+        train_x, val_x, train_y, val_y = train_test_split(ehr_data.drop([outcome_col], axis=1), 
+                                                          ehr_data[outcome_col],
+                                                        test_size=val_ratio/(train_ratio+val_ratio),
+                                                        random_state=seed)
     train_x = pd.concat([train_x, train_y], axis=1)
     val_x = pd.concat([val_x, val_y], axis=1)
     test_x = pd.concat([test_x, test_y], axis=1)
@@ -389,9 +398,11 @@ def generate_train_val_test_set(ehr_data: pl.DataFrame,
     test_x['set'] = 'test'
     ### Print summary statistics
     if verbose:
+        print(f'Created split with {train_x.shape[0]}({train_x.shape[0]/len(ehr_data)}%) samples in train, {val_x.shape[0]}({val_x.shape[0]/len(ehr_data)}%) samples in validation, and {test_x.shape[0]}({test_x.shape[0]/len(ehr_data)}%) samples in test.')
         print('Getting summary statistics for split...')
-        get_train_split_summary(train_x, val_x, test_x, outcome_col, output_path, 
+        get_train_split_summary(train_x, val_x, test_x, outcome_col, output_summary_path, 
                                 cont_cols, nn_cols, disp_dict, verbose=verbose)
+        print(f'Saving train/val/test split IDs to {output_path}')
         
     ### Save patient IDs
     train_x[['subject_id']].to_csv(os.path.join(output_path, 'training_ids.csv'), index=False)
@@ -406,6 +417,7 @@ def generate_train_val_test_set(ehr_data: pl.DataFrame,
 
 
 def clean_notes(notes: pl.DataFrame | pl.LazyFrame) -> pl.DataFrame | pl.LazyFrame:
+    """Cleans notes data by removing any relevant special characters and extra whitespaces."""
     # Remove __
     notes = notes.with_columns(
         target=pl.col("target").str.replace_all(r"\s___\s", " ")
@@ -414,7 +426,6 @@ def clean_notes(notes: pl.DataFrame | pl.LazyFrame) -> pl.DataFrame | pl.LazyFra
     notes = notes.with_columns(
         target=pl.col("target").str.replace_all(r"\s+", " ")
     )
-
     return notes
 
 
@@ -441,8 +452,8 @@ def process_text_to_embeddings(notes: pl.DataFrame) -> dict:
         desc="Generating notes embeddings with ClinicalBERT...",
         total=notes.height,
     ):
-        hadm_id = row["hadm_id"]
-        text = row["subtext"]
+        subj_id = row["subject_id"]
+        text = row["target"]
 
         # Turn text into sentences
         doc = nlp(text)
@@ -468,7 +479,7 @@ def process_text_to_embeddings(notes: pl.DataFrame) -> dict:
         else:
             embeddings = np.zeros((1, 768))  # Handle case with no sentences
 
-        embeddings_dict[hadm_id] = embeddings
+        embeddings_dict[subj_id] = embeddings
 
     return embeddings_dict
 
@@ -571,3 +582,141 @@ def convert_events_to_timeseries(events: pl.DataFrame) -> pl.DataFrame:
         metadata.select(["charttime", "linksto"]), on="charttime", how="inner"
     )
     return timeseries
+
+def generate_interval_dataset(ehr_static: pl.DataFrame, ts_data: pl.DataFrame,
+                              vitals_freq: str = "5h", lab_freq: str = "30m",
+                              edregtime: pl.Series = None,
+                              min_events: int = None, 
+                              max_events: int = None,
+                              impute: str='value', 
+                              include_dyn_mean: bool = False, 
+                              no_resample: bool = False,
+                              max_elapsed: int = None,
+                              ) -> dict:
+    """Generates a multimodal dataset with set intervals for each event source."""
+    # Loop over events per stay to generate a key-data structure
+    data_dict = {}
+    n = 0
+    filter_by_nb_events = 0
+    missing_event_src = 0
+    filter_by_elapsed_time = 0
+    # get all features expected for each event data source and set sampling freq
+    feature_map = {}
+    freq = {}
+    print("Getting lookup intervals for each event source..")
+    for src in ts_data.unique("linksto").get_column("linksto").to_list():
+        feature_map[src] = sorted(
+            ts_data.filter(pl.col("linksto") == src)
+            .unique("label")
+            .get_column("label")
+            .to_list()
+        )
+        freq[src] = vitals_freq if src == "vitalsign" else lab_freq
+    # Filter events by number of events per patient
+    min_events = 1 if min_events is None else int(min_events)
+    max_events = 1e6 if max_events is None else int(max_events)
+    for pt_events in tqdm(
+        ts_data.partition_by("subject_id", include_key=True),
+        desc="Generating patient-level data...",
+    ):
+        id_val = pt_events["subject_id"][0]
+        # filter if not at least one entry from each event data source
+        if pt_events.n_unique("linksto") < pt_events.n_unique("linksto"):
+            missing_event_src += 1
+            continue
+
+        write_data = True
+        ts_data = []
+        for events_by_src in pt_events.partition_by("linksto"):
+            src = events_by_src.select(pl.first("linksto")).item()
+            # Convert event data to timeseries
+            timeseries = convert_events_to_timeseries(events_by_src)
+            if (timeseries.shape[0] < min_events) | (timeseries.shape[0] > max_events):
+                filter_by_nb_events += 1
+                write_data = False
+                break
+            features = feature_map[src]
+            # Ensure models have the same number of features
+            missing_cols = [x for x in features if x not in timeseries.columns]
+            # create empty columns for missing features
+            timeseries = timeseries.with_columns(
+                [pl.lit(None, dtype=pl.Float64).alias(c) for c in missing_cols]
+            )
+
+            # Impute missing values
+            if impute is not None:
+                # TODO: Consider using mean value for missing static data such as height and weight rather than constant?
+                if impute == "mask":
+                    # Add new mask columns for whether row is nan or not
+                    timeseries = timeseries.with_columns(
+                        [pl.col(f).is_null().alias(f + "_isna") for f in features]
+                    )
+                    ehr_static = ehr_static.with_columns(
+                        [
+                            pl.col(f).is_null().alias(f + "_isna")
+                            for f in ehr_static.columns
+                        ]
+                    )
+
+                elif (impute == "forward") | (impute == "backward"):
+                    # Fill missing values using forward fill
+                    timeseries = timeseries.fill_null(strategy=impute)
+
+                    # for remaining null values use fixed value
+                    timeseries = timeseries.fill_null(value=-1)
+                    ehr_static = ehr_static.fill_null(value=-1)
+
+                elif impute == "value":
+                    timeseries = timeseries.fill_null(value=-1)
+                    ehr_static = ehr_static.fill_null(value=-1)
+
+                else:
+                    raise ValueError(
+                        "impute_strategy must be one of [None, mask, value, forward, backward]"
+                    )
+
+            if include_dyn_mean:
+                # Option to get mean value during stay (drop time col)
+                timeseries_mean = timeseries.drop(["charttime", "linksto"]).mean()
+                timeseries_mean = timeseries_mean.with_columns(pl.all().round(3))
+                # Add to static data
+                ehr_static = ehr_static.hstack(timeseries_mean)
+
+            if not no_resample:
+                # Upsample and then downsample to create regular intervals e.g., 2-hours
+                timeseries = timeseries.upsample(time_column="charttime", every="1m")
+                timeseries = timeseries.group_by_dynamic(
+                    "charttime",
+                    every=freq[src],
+                ).agg(pl.col(pl.Float64).mean())
+                timeseries = timeseries.fill_null(strategy="forward")
+
+            timeseries = add_time_elapsed_to_events(timeseries, edregtime)
+            # only include first x hours - note this could lead to all data being lost so skip if that is the case
+            if max_elapsed is not None:
+                timeseries = timeseries.filter(pl.col("elapsed") <= max_elapsed)
+
+            if timeseries.shape[0] == 0:
+                filter_by_elapsed_time += 1
+                write_data = False
+                break
+            timeseries = timeseries.select(features)
+            ts_data.append(timeseries)
+
+        if write_data:
+            data_dict[id_val] = {}
+            data_dict[id_val]["static"] = ehr_static
+
+            for idx, ts in enumerate(ts_data):
+                data_dict[id_val][f"dynamic_{idx}"] = ts
+                
+            n += 1
+
+        write_data = True
+
+    print(f"Successfully processed time-series intervals for {n} patients.")
+    print(f"Skipping {filter_by_nb_events} patients with less or greater number of events than specified.")
+    print(f"Skipping {missing_event_src} patients due to at least one missing time-series source.")
+    print(f"SKIPPING {filter_by_elapsed_time} patients due to no measures within elapsed time.")
+    
+    return data_dict
