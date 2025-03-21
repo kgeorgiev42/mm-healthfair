@@ -25,7 +25,7 @@ def preproc_icd_module(diagnoses: pl.DataFrame | pl.LazyFrame,
     if isinstance(diagnoses, pl.LazyFrame):
         diagnoses = diagnoses.collect()
 
-    def standardize_icd(mapping, df, root=False):
+    def standardize_icd(mapping, df, root=False, icd_num=9):
         """Takes an ICD9 -> ICD10 mapping table and a module dataframe; 
         adds column with converted ICD10 column"""
         
@@ -36,21 +36,22 @@ def preproc_icd_module(diagnoses: pl.DataFrame | pl.LazyFrame,
             try:
                 # Many ICD-9's do not have a 1-to-1 mapping; get first index of mapped codes
                 return mapping.filter(pl.col(map_code_colname) == icd).select('icd10cm').to_series()[0]
-            except:
-                #print("Error on code", icd)
+            except IndexError:
+                # Handle case where no mapping is found for the ICD code
                 return np.nan
 
         # Create new column with original codes as default
         col_name = 'icd10_convert'
-        if root: col_name = 'root_' + col_name
+        if root: 
+            col_name = 'root_' + col_name
         df = df.with_columns(pl.col('icd_code').alias(col_name).cast(pl.Utf8))
 
         # Convert ICD9 codes to ICD10 in a vectorized manner
-        icd9_codes = df.filter(pl.col('icd_version') == 9).select('icd_code').unique().to_series().to_list()
+        icd9_codes = df.filter(pl.col('icd_version') == icd_num).select('icd_code').unique().to_series().to_list()
         icd9_to_icd10_map = {code: icd_9to10(code) for code in icd9_codes}
         
         df = df.with_columns(
-            pl.when(pl.col('icd_version') == 9)
+            pl.when(pl.col('icd_version') == icd_num)
             .then(pl.col('icd_code').apply(lambda x: icd9_to_icd10_map.get(x, np.nan), return_dtype=pl.Utf8))
             .otherwise(pl.col(col_name))
             .alias(col_name)
@@ -68,8 +69,6 @@ def preproc_icd_module(diagnoses: pl.DataFrame | pl.LazyFrame,
         diagnoses = standardize_icd(icd_map, diagnoses, root=True)
         diagnoses = diagnoses.filter(pl.col('root_icd10_convert').is_not_null())
         if verbose:
-            print("# unique ICD-9 codes", diagnoses.filter(pl.col('icd_version') == 9).select('icd_code').n_unique())
-            print("# unique ICD-10 codes", diagnoses.filter(pl.col('icd_version') == 10).select('icd_code').n_unique())
             print("# unique ICD-10 codes (After converting ICD-9 to ICD-10)", diagnoses.select('root_icd10_convert').n_unique())
             print("# unique ICD-10 codes (After clinical grouping ICD-10 codes)", diagnoses.select('root').n_unique())
             print("# Unique patients:  ", diagnoses.select('hadm_id').n_unique())
@@ -98,6 +97,7 @@ def preproc_icd_module(diagnoses: pl.DataFrame | pl.LazyFrame,
 def get_ltc_features(admits_last: pl.DataFrame | pl.LazyFrame,
                      diagnoses: pl.DataFrame | pl.LazyFrame,
                      ltc_dict_path: str = "../outputs/icd10_codes.json",
+                     mm_cutoff: int = 1, cmm_cutoff: int = 3,
                      verbose=True, use_lazy: bool = False) -> pl.DataFrame:
     """Generates features for long-term conditions from a diagnoses table and a dictionary of ICD-10 codes."""
     
@@ -120,15 +120,15 @@ def get_ltc_features(admits_last: pl.DataFrame | pl.LazyFrame,
             ltc_dict = json.load(json_dict)
         for ltc_code, _ in ltc_dict.items():
             diag_flat = diag_flat.with_columns(
-                pl.col('ltc_code').apply(lambda x: 1 if ltc_code in x else 0).alias(ltc_code)
+                pl.col('ltc_code').apply(lambda x, ltc=ltc_code: 1 if ltc in x else 0).alias(ltc_code)
             )
 
     ### Create features for multimorbidity
     diag_flat = diag_flat.with_columns([
         pl.col('ltc_code').apply(contains_both_ltc_types, return_dtype=pl.Int8).alias('phys_men_multimorbidity'),
         pl.col('ltc_code').apply(len, return_dtype=pl.Int8).alias('n_unique_conditions'),
-        pl.when(pl.col('ltc_code').apply(len, return_dtype=pl.Int8) > 1).then(1).otherwise(0).alias('is_multimorbid'),
-        pl.when(pl.col('ltc_code').apply(len, return_dtype=pl.Int8) > 3).then(1).otherwise(0).alias('is_complex_multimorbid')
+        pl.when(pl.col('ltc_code').apply(len, return_dtype=pl.Int8) > mm_cutoff).then(1).otherwise(0).alias('is_multimorbid'),
+        pl.when(pl.col('ltc_code').apply(len, return_dtype=pl.Int8) > cmm_cutoff).then(1).otherwise(0).alias('is_complex_multimorbid')
     ])
     
     ### Merge with base patient data
@@ -298,7 +298,6 @@ def remove_correlated_features(ehr_data: pl.DataFrame,
         for j in range(i + 1):
             item = corr_matrix.iloc[j:(j + 1), (i + 1):(i + 2)]
             colname = item.columns
-            row = item.index
             val = abs(item.values)
             if val >= threshold:
                 #if verbose:
@@ -589,7 +588,7 @@ def generate_interval_dataset(ehr_static: pl.DataFrame, ts_data: pl.DataFrame,
                               include_dyn_mean: bool = False, 
                               no_resample: bool = False,
                               max_elapsed: int = None,
-                              vitals_lkup: list = [],
+                              vitals_lkup: list = None,
                               verbose: bool = True) -> dict:
     """Generates a multimodal dataset with set intervals for each event source."""
     data_dict = {}
@@ -599,9 +598,45 @@ def generate_interval_dataset(ehr_static: pl.DataFrame, ts_data: pl.DataFrame,
     filter_by_elapsed_time = 0
     n_src = ts_data.n_unique("linksto")
     
-    feature_map = {}
-    freq = {}
-    print("Getting lookup intervals for each event source..")
+    feature_map, freq = _prepare_feature_map_and_freq(ts_data, vitals_freq, lab_freq)
+    min_events = 1 if min_events is None else int(min_events)
+    max_events = 1e6 if max_events is None else int(max_events)
+
+    ts_data = ts_data.sort(by=["subject_id", "charttime"])
+    ehr_regtime = ehr_regtime.sort(by=["subject_id", "edregtime"])
+
+    for id_val in tqdm(ts_data.unique("subject_id").get_column("subject_id").to_list(),
+                       desc="Generating patient-level data..."):
+        pt_events = ts_data.filter(pl.col("subject_id") == id_val)
+        edregtime = ehr_regtime.filter(pl.col("subject_id") == id_val).select("edregtime").head(1).item()
+
+        if pt_events.n_unique("linksto") < n_src:
+            missing_event_src += 1
+            continue
+
+        write_data, ts_data_list = _process_patient_events(
+            pt_events, feature_map, freq, ehr_static, edregtime, min_events, max_events,
+            impute, include_dyn_mean, no_resample, max_elapsed
+        )
+
+        if write_data:
+            data_dict[id_val] = {"static": ehr_static}
+            for idx, ts in enumerate(ts_data_list):
+                key = "dynamic_0" if ts.columns == vitals_lkup else "dynamic_1"
+                data_dict[id_val][key] = ts
+            n += 1
+
+    if verbose:
+        _print_summary(n, filter_by_nb_events, missing_event_src, filter_by_elapsed_time)
+
+    return data_dict
+
+
+def _prepare_feature_map_and_freq(ts_data: pl.DataFrame, 
+                                  vitals_freq: str = "5h", 
+                                  lab_freq: str = "1h") -> tuple[dict, dict]:
+    feature_map: dict = {}
+    freq: dict = {}
     for src in tqdm(ts_data.unique("linksto").get_column("linksto").to_list()):
         feature_map[src] = sorted(
             ts_data.filter(pl.col("linksto") == src)
@@ -610,98 +645,100 @@ def generate_interval_dataset(ehr_static: pl.DataFrame, ts_data: pl.DataFrame,
             .to_list()
         )
         freq[src] = vitals_freq if src == "vitalsign" else lab_freq
+    return feature_map, freq
 
-    min_events = 1 if min_events is None else int(min_events)
-    max_events = 1e6 if max_events is None else int(max_events)
-    print("Imputing event intervals per patient..")
-    ts_data = ts_data.sort(by=["subject_id", "charttime"])
-    ehr_regtime = ehr_regtime.sort(by=["subject_id", "edregtime"])
-    for id_val in tqdm(ts_data.unique("subject_id").get_column("subject_id").to_list(),
-            desc="Generating patient-level data...",
-    ):
-        pt_events = ts_data.filter(pl.col("subject_id") == id_val)
-        edregtime = ehr_regtime.filter(pl.col("subject_id") == id_val).select("edregtime").head(1).item()
-        if pt_events.n_unique("linksto") < n_src:
-            missing_event_src += 1
-            continue
 
-        write_data = True
-        ts_data_list = []
-        for events_by_src in pt_events.partition_by("linksto"):
-            src = events_by_src.select(pl.first("linksto")).item()
-            timeseries = convert_events_to_timeseries(events_by_src)
-            if (timeseries.shape[0] < min_events) | (timeseries.shape[0] > max_events):
-                filter_by_nb_events += 1
-                write_data = False
-                break
-            features = feature_map[src]
-            missing_cols = [x for x in features if x not in timeseries.columns]
-            timeseries = timeseries.with_columns(
-                [pl.lit(None, dtype=pl.Float64).alias(c) for c in missing_cols]
-            )
+def _process_patient_events(pt_events: pl.DataFrame, 
+                            feature_map: dict, 
+                            freq: dict, 
+                            ehr_static: pl.DataFrame, 
+                            edregtime: pl.Datetime, 
+                            min_events: int = 1, 
+                            max_events: int = None, 
+                            impute: str = "value", 
+                            include_dyn_mean: bool = False, 
+                            no_resample: bool = False, 
+                            max_elapsed: int = None) -> tuple[bool, list[pl.DataFrame]]:
+    write_data = True
+    ts_data_list = []
 
-            if impute is not None:
-                if impute == "mask":
-                    timeseries = timeseries.with_columns(
-                        [pl.col(f).is_null().alias(f + "_isna") for f in features]
-                    )
-                    ehr_static = ehr_static.with_columns(
-                        [
-                            pl.col(f).is_null().alias(f + "_isna")
-                            for f in ehr_static.columns
-                        ]
-                    )
-                elif impute in ["forward", "backward"]:
-                    timeseries = timeseries.fill_null(strategy=impute)
-                    timeseries = timeseries.fill_null(value=-1)
-                    ehr_static = ehr_static.fill_null(value=-1)
-                elif impute == "value":
-                    timeseries = timeseries.fill_null(value=-1)
-                    ehr_static = ehr_static.fill_null(value=-1)
-                else:
-                    raise ValueError(
-                        "impute_strategy must be one of [None, mask, value, forward, backward]"
-                    )
+    for events_by_src in pt_events.partition_by("linksto"):
+        src = events_by_src.select(pl.first("linksto")).item()
+        timeseries = convert_events_to_timeseries(events_by_src)
 
-            if include_dyn_mean:
-                timeseries_mean = timeseries.drop(["charttime", "linksto"]).mean()
-                timeseries_mean = timeseries_mean.with_columns(pl.all().round(3))
-                ehr_static = ehr_static.hstack(timeseries_mean)
+        if not _validate_event_count(timeseries, min_events, max_events):
+            return False, []
 
-            if not no_resample:
-                timeseries = timeseries.upsample(time_column="charttime", every="1m")
-                timeseries = timeseries.group_by_dynamic(
-                    "charttime",
-                    every=freq[src],
-                ).agg(pl.col(pl.Float64).mean())
-                timeseries = timeseries.fill_null(strategy="forward")
+        timeseries = _handle_missing_features(timeseries, feature_map[src])
+        timeseries, ehr_static = _impute_missing_values(timeseries, ehr_static, impute)
 
-            if max_elapsed is not None:
-                timeseries = add_time_elapsed_to_events(timeseries, edregtime)
-                timeseries = timeseries.filter(pl.col("elapsed") <= max_elapsed)
-            else:
-                timeseries = add_time_elapsed_to_events(timeseries, edregtime)
+        if include_dyn_mean:
+            ehr_static = _add_dynamic_mean(timeseries, ehr_static)
 
-            if timeseries.shape[0] == 0:
-                filter_by_elapsed_time += 1
-                write_data = False
-                break
-            timeseries = timeseries.select(features)
-            ts_data_list.append(timeseries)
+        if not no_resample:
+            timeseries = _resample_timeseries(timeseries, freq[src])
 
-        if write_data:
-            data_dict[id_val] = {"static": ehr_static}
-            for _, ts in enumerate(ts_data_list):
-                if ts.columns==vitals_lkup:
-                    data_dict[id_val]["dynamic_0"] = ts
-                else:
-                    data_dict[id_val]["dynamic_1"] = ts
-            n += 1
+        if max_elapsed is not None:
+            timeseries = add_time_elapsed_to_events(timeseries, edregtime)
+            if timeseries.filter(pl.col("elapsed") <= max_elapsed).shape[0] == 0:
+                return False, []
 
-    if verbose:
-        print(f"Successfully processed time-series intervals for {n} patients.")
-        print(f"Skipping {filter_by_nb_events} patients with less or greater number of events than specified.")
-        print(f"Skipping {missing_event_src} patients due to at least one missing time-series source.")
-        print(f"Skipping {filter_by_elapsed_time} patients due to no measures within elapsed time.")
-        
-    return data_dict
+        ts_data_list.append(timeseries.select(feature_map[src]))
+
+    return write_data, ts_data_list
+
+
+def _validate_event_count(timeseries: pl.DataFrame, min_events: int = 1, max_events: int = 1e6) -> bool:
+    return min_events <= timeseries.shape[0] <= max_events
+
+
+def _handle_missing_features(timeseries: pl.DataFrame, features: list[str] = None) -> pl.DataFrame:
+    missing_cols = [x for x in features if x not in timeseries.columns]
+    return timeseries.with_columns(
+        [pl.lit(None, dtype=pl.Float64).alias(c) for c in missing_cols]
+    )
+
+def _impute_missing_values(timeseries: pl.DataFrame, ehr_static: pl.DataFrame, impute: str = "value") -> tuple[pl.DataFrame, pl.DataFrame]:
+    if impute == "mask":
+        timeseries = timeseries.with_columns(
+            [pl.col(f).is_null().alias(f + "_isna") for f in timeseries.columns]
+        )
+        ehr_static = ehr_static.with_columns(
+            [pl.col(f).is_null().alias(f + "_isna") for f in ehr_static.columns]
+        )
+    elif impute in ["forward", "backward"]:
+        timeseries = timeseries.fill_null(strategy=impute).fill_null(value=-1)
+        ehr_static = ehr_static.fill_null(value=-1)
+    elif impute == "value":
+        timeseries = timeseries.fill_null(value=-1)
+        ehr_static = ehr_static.fill_null(value=-1)
+    return timeseries, ehr_static
+
+
+def _add_dynamic_mean(timeseries: pl.DataFrame, ehr_static: pl.DataFrame) -> pl.DataFrame:
+    timeseries_mean = timeseries.drop(["charttime", "linksto"]).mean().with_columns(pl.all().round(3))
+    return ehr_static.hstack(timeseries_mean)
+
+
+def _resample_timeseries(timeseries: pl.DataFrame, freq: str = "1h") -> pl.DataFrame:
+    """Resamples the time-series data to a specified frequency.
+
+    Args:
+        timeseries (pl.DataFrame): The input time-series data.
+        freq (str, optional): The frequency for resampling. Defaults to "1h".
+
+    Returns:
+        pl.DataFrame: The resampled time-series data.
+    """
+    timeseries = timeseries.upsample(time_column="charttime", every="1m")
+    return timeseries.group_by_dynamic("charttime", every=freq).agg(pl.col(pl.Float64).mean()).fill_null(strategy="forward")
+
+
+def _print_summary(n: int = 0, 
+                   filter_by_nb_events: int = 0, 
+                   missing_event_src: int = 0, 
+                   filter_by_elapsed_time: int = 0) -> None:
+    print(f"Successfully processed time-series intervals for {n} patients.")
+    print(f"Skipping {filter_by_nb_events} patients with less or greater number of events than specified.")
+    print(f"Skipping {missing_event_src} patients due to at least one missing time-series source.")
+    print(f"Skipping {filter_by_elapsed_time} patients due to no measures within elapsed time.")

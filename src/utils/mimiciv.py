@@ -7,6 +7,7 @@ from utils.preprocessing import clean_labevents, prepare_medication_features, re
 
 def read_admissions_table(
     mimic4_path: str, use_lazy: bool = False, verbose: bool = True,
+    ext_stay_threshold: int = 7
 ) -> pl.LazyFrame | pl.DataFrame:
     """Reads in admissions.csv.gz table and formats column types.
 
@@ -69,8 +70,9 @@ def read_admissions_table(
     admits = admits.with_columns(
         ((pl.col("dischtime") - pl.col("admittime")).dt.seconds() / (24 * 60 * 60)).alias("los_days")
     )
+
     admits = admits.with_columns(
-        (pl.col("los_days") > 7).cast(pl.Int8).alias("ext_stay_7")
+        (pl.col("los_days") > ext_stay_threshold).cast(pl.Int8).alias("ext_stay_7")
     )
     if verbose:
         print(f'Subjects with extended stay > 7 days: {admits.filter(pl.col("ext_stay_7") == 1).select("subject_id").n_unique()}, % of pts: {admits.filter(pl.col("ext_stay_7") == 1).select("subject_id").n_unique() / admits.select("subject_id").n_unique() * 100:.2f}')
@@ -80,7 +82,7 @@ def read_admissions_table(
 
 def read_patients_table(
     mimic4_path: str, admissions_data: pl.DataFrame | pl.LazyFrame, 
-    use_lazy: bool = False, verbose: bool = True
+    age_cutoff: int = 18, use_lazy: bool = False, verbose: bool = True, 
 ) -> pl.LazyFrame | pl.DataFrame:
     """Reads in patients.csv.gz table and formats column types.
 
@@ -107,7 +109,7 @@ def read_patients_table(
         (pl.col("anchor_year") - pl.col("anchor_age")).alias("yob")
     ).drop("anchor_year")
     pats = pats.join(admissions_data, on="subject_id", how="left")
-    pats = pats.filter(pl.col("anchor_age") >= 18)
+    pats = pats.filter(pl.col("anchor_age") >= age_cutoff)
     pats = pats.with_columns(
         pl.col("discharge_location").fill_null("UNKNOWN")
     )
