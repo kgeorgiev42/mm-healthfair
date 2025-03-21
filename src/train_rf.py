@@ -83,7 +83,7 @@ if __name__ == "__main__":
             {
                 "n_estimators": [10, 100, 1000, 5000],
                 "criterion": ["gini", "entropy"],
-                "max_depth": [2, 3, 5, 10]
+                "max_depth": [2, 3, 5, 10],
             }
         ]
 
@@ -98,8 +98,12 @@ if __name__ == "__main__":
 
     else:
         print("Training a single RF model...")
-        model = RandomForestClassifier(n_estimators=20000, max_depth=5,
-            random_state=0, class_weight="balanced", criterion="log_loss"
+        model = RandomForestClassifier(
+            n_estimators=20000,
+            max_depth=5,
+            random_state=0,
+            class_weight="balanced",
+            criterion="log_loss",
         )
 
     model.fit(x_train, y_train)

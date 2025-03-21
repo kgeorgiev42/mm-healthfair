@@ -20,8 +20,8 @@ def load_pickle(filepath: str) -> Any:
         data = pickle.load(f)
     return data
 
-def save_pickle(target: dict, filepath: str,
-                fname: str="mm_feat.pkl") -> Any:
+
+def save_pickle(target: dict, filepath: str, fname: str = "mm_feat.pkl") -> Any:
     """Save a pickled object from a dictionary.
 
     Args:
@@ -69,6 +69,7 @@ def impute_from_df(
 
     return impute_to
 
+
 def get_final_episodes(stays: pl.DataFrame | pl.LazyFrame) -> pl.DataFrame:
     """Extracts the final ED episode with hospitalisation for creating a unique patient cohort.
 
@@ -83,13 +84,22 @@ def get_final_episodes(stays: pl.DataFrame | pl.LazyFrame) -> pl.DataFrame:
 
     ### Sort values and get final ED episode
     ### Save second to last episode for validation
-    stays_final = stays.sort(["subject_id", "edregtime"]).unique(subset=["subject_id"], keep="last")
+    stays_final = stays.sort(["subject_id", "edregtime"]).unique(
+        subset=["subject_id"], keep="last"
+    )
     ### Get second-to-last episode for time-series collection
-    stays_second_last = stays.sort(["subject_id", "edregtime"]).filter(~pl.col("hadm_id").is_in(stays_final["hadm_id"]))
-    stays_second_last = stays.sort(["subject_id", "edregtime"]).unique(subset=["subject_id"], keep="last")
-    stays_second_last = stays_second_last.rename({"edregtime": "prev_edregtime", "dischtime": "prev_dischtime"}).select(["subject_id", "prev_edregtime", "prev_dischtime"])
+    stays_second_last = stays.sort(["subject_id", "edregtime"]).filter(
+        ~pl.col("hadm_id").is_in(stays_final["hadm_id"])
+    )
+    stays_second_last = stays.sort(["subject_id", "edregtime"]).unique(
+        subset=["subject_id"], keep="last"
+    )
+    stays_second_last = stays_second_last.rename(
+        {"edregtime": "prev_edregtime", "dischtime": "prev_dischtime"}
+    ).select(["subject_id", "prev_edregtime", "prev_dischtime"])
     stays_final = stays_final.join(stays_second_last, on="subject_id", how="left")
     return stays_final
+
 
 def get_n_unique_values(
     table: pl.DataFrame | pl.LazyFrame, use_col: str = "subject_id"
@@ -143,13 +153,15 @@ def scale_numeric_features(
     scaled = scaled.with_columns(pl.all().round(2))
     return table.select(pl.col("*").exclude(numeric_cols)).hstack(scaled)
 
+
 def read_icd_mapping(map_path: str) -> pl.DataFrame:
     """
     Reads ICD-9 to ICD-10 mapping file for chronic conditions.
     """
-    mapping = pl.read_csv(map_path, separator='\t', encoding='iso-8859-1')
+    mapping = pl.read_csv(map_path, separator="\t", encoding="iso-8859-1")
     mapping = mapping.with_columns(pl.col("diagnosis_description").str.to_lowercase())
     return mapping
+
 
 def contains_both_ltc_types(ltc_set: set) -> bool:
     """
@@ -166,6 +178,7 @@ def contains_both_ltc_types(ltc_set: set) -> bool:
     menltc_present = ltc_series.str.starts_with("menltc_").any()
     return physltc_present and menltc_present
 
+
 def preview_data(filepath: str) -> None:
     """Prints a single example from data dictionary.
 
@@ -175,6 +188,7 @@ def preview_data(filepath: str) -> None:
     data_dict = load_pickle(filepath)
     example_id = list(data_dict.keys())[-1]
     print(f"Example data:{data_dict[example_id]}")
+
 
 def get_demographics_summary(ed_pts: pl.DataFrame | pl.LazyFrame) -> None:
     """
@@ -187,56 +201,66 @@ def get_demographics_summary(ed_pts: pl.DataFrame | pl.LazyFrame) -> None:
     """
     if isinstance(ed_pts, pl.LazyFrame):
         ed_pts = ed_pts.collect().to_pandas()
-        
-    print('Demographics summary')
-    print('Unique patients:', ed_pts.subject_id.nunique())
-    print('Age distribution:', ed_pts.anchor_age.describe())
-    print('Gender distribution:', ed_pts.gender.value_counts())
-    print('-------------------------------')
-    print('Health outcomes')
+
+    print("Demographics summary")
+    print("Unique patients:", ed_pts.subject_id.nunique())
+    print("Age distribution:", ed_pts.anchor_age.describe())
+    print("Gender distribution:", ed_pts.gender.value_counts())
+    print("-------------------------------")
+    print("Health outcomes")
     print(ed_pts.in_hosp_death.value_counts(normalize=True))
     print(ed_pts.ext_stay_7.value_counts(normalize=True))
     print(ed_pts.non_home_discharge.value_counts(normalize=True))
     print(ed_pts.icu_admission.value_counts(normalize=True))
-    print('-------------------------------')
-    print('Multimorbidity')
+    print("-------------------------------")
+    print("Multimorbidity")
     print(ed_pts.is_multimorbid.value_counts(normalize=True))
     print(ed_pts.is_complex_multimorbid.value_counts(normalize=True))
-    print('-------------------------------')
+    print("-------------------------------")
 
-def get_train_split_summary(train: pd.DataFrame, 
-                              val: pd.DataFrame, 
-                              test: pd.DataFrame,
-                              outcome: str="in_hosp_death",
-                              output_path: str="../outputs/exp_data",
-                              cont_cols: list=None,
-                              nn_cols: list=None,
-                              disp_dict: dict=None,
-                              cat_cols: list=None,
-                            verbose: bool=True) -> None:
-    
+
+def get_train_split_summary(
+    train: pd.DataFrame,
+    val: pd.DataFrame,
+    test: pd.DataFrame,
+    outcome: str = "in_hosp_death",
+    output_path: str = "../outputs/exp_data",
+    cont_cols: list = None,
+    nn_cols: list = None,
+    disp_dict: dict = None,
+    cat_cols: list = None,
+    verbose: bool = True,
+) -> None:
     """Helper function to print statistical train-validation-test split summary."""
     if verbose:
-        print(f'Saving demographic summary for training split of outcome {outcome}.')
+        print(f"Saving demographic summary for training split of outcome {outcome}.")
     samples = pd.concat([train, val, test], axis=0)
     samples_disp = samples.rename(columns=disp_dict)
     for col in cat_cols:
-        samples_disp[col] = samples_disp[col].replace({0: 'N', 1: 'Y'})
-    sum_table = TableOne(samples_disp, [col for col in disp_dict.values()],
-                         order={'set': ['train', 'val', 'test']},
-                         categorical=[col for col in disp_dict.values() if col not in cont_cols],
-                         overall=True, groupby='set', pval=True, htest_name=True,
-                         tukey_test=True, nonnormal=nn_cols)
-    sum_table.to_html(os.path.join(output_path, f'train_summary_{outcome}.html'))
+        samples_disp[col] = samples_disp[col].replace({0: "N", 1: "Y"})
+    sum_table = TableOne(
+        samples_disp,
+        [col for col in disp_dict.values()],
+        order={"set": ["train", "val", "test"]},
+        categorical=[col for col in disp_dict.values() if col not in cont_cols],
+        overall=True,
+        groupby="set",
+        pval=True,
+        htest_name=True,
+        tukey_test=True,
+        nonnormal=nn_cols,
+    )
+    sum_table.to_html(os.path.join(output_path, f"train_summary_{outcome}.html"))
     if verbose:
-        print(f'Saved {outcome} summary to {output_path}/train_summary_{outcome}.html.')
+        print(f"Saved {outcome} summary to {output_path}/train_summary_{outcome}.html.")
 
 
 def rename_fields(col):
     """Helper rename function for drug and specialty feature names."""
     if isinstance(col, tuple):
-        col = '_'.join(str(c) for c in col)
+        col = "_".join(str(c) for c in col)
     return col
+
 
 def read_from_txt(filepath: str, as_type="str") -> list:
     """Read from line-seperated txt file.

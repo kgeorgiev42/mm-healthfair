@@ -68,7 +68,7 @@ parser.add_argument(
 parser.add_argument(
     "--corr_method",
     type=str,
-    default='pearson',
+    default="pearson",
     help="Method for removing correlated features. Defaults to Pearson correlation.",
 )
 parser.add_argument(
@@ -111,7 +111,10 @@ parser.add_argument(
     help="Ratio of training data to create split.",
 )
 parser.add_argument(
-    "--stratify", action="store_true", default=False, help="Whether to stratify the split by outcome and sensitive attributes."
+    "--stratify",
+    action="store_true",
+    default=False,
+    help="Whether to stratify the split by outcome and sensitive attributes.",
 )
 parser.add_argument(
     "--seed", type=int, default=0, help="Seed for random sampling. Defaults to 0."
@@ -120,9 +123,7 @@ parser.add_argument("--verbose", "-v", action="store_true", help="Verbosity.")
 args = parser.parse_args()
 output_dir = args.data_dir if args.output_dir is None else args.output_dir
 
-print(
-    f"Processing data from {args.data_dir}..."
-)
+print(f"Processing data from {args.data_dir}...")
 
 # If pkl file exists then remove and start over
 if len(glob.glob(os.path.join(output_dir, "*.pkl"))) > 0:
@@ -145,12 +146,16 @@ elif not os.path.exists(output_dir):
 print(f"Reading pre-extracted data from {args.data_dir}...")
 # Read extracted data
 if os.path.exists(os.path.join(args.data_dir, "ehr_static.csv")):
-    ehr_data = pl.read_csv(os.path.join(args.data_dir, "ehr_static.csv"), try_parse_dates=True)
+    ehr_data = pl.read_csv(
+        os.path.join(args.data_dir, "ehr_static.csv"), try_parse_dates=True
+    )
 else:
     print(f"No EHR data found under {args.data_dir}. Exiting..")
     sys.exit()
 if os.path.exists(os.path.join(args.data_dir, "events_ts.csv")):
-    events = pl.scan_csv(os.path.join(args.data_dir, "events_ts.csv"), try_parse_dates=True)
+    events = pl.scan_csv(
+        os.path.join(args.data_dir, "events_ts.csv"), try_parse_dates=True
+    )
 else:
     print(f"No time-series data found under {args.data_dir}. Exiting..")
     sys.exit()
@@ -178,10 +183,16 @@ if args.verbose:
     ehr_proc = encode_categorical_features(ehr_data)
     ### Save edregtime for time-series processing
     ehr_regtime = ehr_proc.select(["subject_id", "edregtime"])
-    ehr_proc = extract_lookup_fields(ehr_proc, lookup, lookup_output_path=args.output_reference_dir)
-    ehr_proc = remove_correlated_features(ehr_proc, feats_to_save, threshold=args.corr_threshold, 
-                                          method=args.corr_method,
-                                          verbose=args.verbose)
+    ehr_proc = extract_lookup_fields(
+        ehr_proc, lookup, lookup_output_path=args.output_reference_dir
+    )
+    ehr_proc = remove_correlated_features(
+        ehr_proc,
+        feats_to_save,
+        threshold=args.corr_threshold,
+        method=args.corr_method,
+        verbose=args.verbose,
+    )
 print("---------------------------------")
 #### TIMESERIES PREPROCESSING ####
 print("START TIME-SERIES DATA PREPROCESSING")
@@ -190,11 +201,21 @@ print("---------------------------------")
 events = events.collect(streaming=True)
 # get all features expected for each event data source and set sampling freq
 print(f"Imputing missing values using strategy: {args.impute}")
-feature_dict = generate_interval_dataset(ehr_proc, events, ehr_regtime,
-                                            vitals_freq, lab_freq,
-                                            args.min_events, args.max_events,
-                                            args.impute, args.include_dyn_mean, args.no_resample,
-                                            args.max_elapsed, vitals, args.verbose)
+feature_dict = generate_interval_dataset(
+    ehr_proc,
+    events,
+    ehr_regtime,
+    vitals_freq,
+    lab_freq,
+    args.min_events,
+    args.max_events,
+    args.impute,
+    args.include_dyn_mean,
+    args.no_resample,
+    args.max_elapsed,
+    vitals,
+    args.verbose,
+)
 print("---------------------------------")
 #### NOTES PREPROCESSING ###
 if args.include_notes:
@@ -215,8 +236,9 @@ if args.include_notes:
     # Add embeddings to feature dictionary
     if args.verbose:
         print("Appending embeddings to feature dictionary..")
-    for id_val in tqdm(notes.unique("subject_id").get_column("subject_id").to_list(),
-            desc="Linking note embeddings to feature dictionary...",
+    for id_val in tqdm(
+        notes.unique("subject_id").get_column("subject_id").to_list(),
+        desc="Linking note embeddings to feature dictionary...",
     ):
         if id_val not in embeddings.keys() or id_val not in feature_dict.keys():
             continue
@@ -228,16 +250,24 @@ print("---------------------------------")
 for outcome in outcomes:
     print(f"Processing splits for outcome: {outcome}")
     ehr_data = ehr_data.filter(pl.col("subject_id").is_in(feature_dict.keys()))
-    generate_train_val_test_set(ehr_data, args.output_dir, outcome, args.output_summary_dir,
-                                args.seed, args.train_ratio, (1 - args.train_ratio)/2, 
-                                (1 - args.train_ratio)/2, stratify=args.stratify,
-                                verbose=args.verbose)
+    generate_train_val_test_set(
+        ehr_data,
+        args.output_dir,
+        outcome,
+        args.output_summary_dir,
+        args.seed,
+        args.train_ratio,
+        (1 - args.train_ratio) / 2,
+        (1 - args.train_ratio) / 2,
+        stratify=args.stratify,
+        verbose=args.verbose,
+    )
 print("---------------------------------")
 print("Finished train/val/test split creation.")
 print("---------------------------------")
 # Preview example data
-#example_id = list(data_dict.keys())[-1]
-#print(f"Example data:\n\t{data_dict[example_id]}")
+# example_id = list(data_dict.keys())[-1]
+# print(f"Example data:\n\t{data_dict[example_id]}")
 print(f"Feature preparation successful. Exporting prepared features to {output_dir}..")
 # Save dictionary to disk
 save_pickle(feature_dict, output_dir, args.pkl_fname)

@@ -7,9 +7,13 @@ import toml
 import utils.exploration as m4exp
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Data exploration functionality for MIMIC-IV v3.1.")
+    parser = argparse.ArgumentParser(
+        description="Data exploration functionality for MIMIC-IV v3.1."
+    )
     parser.add_argument(
-        "ehr_path", type=str, help="Directory containing pre-extracted MIMIC-IV EHR data."
+        "ehr_path",
+        type=str,
+        help="Directory containing pre-extracted MIMIC-IV EHR data.",
     )
     parser.add_argument(
         "--config",
@@ -106,38 +110,84 @@ if __name__ == "__main__":
     if len(categorical) == 0:
         categorical = None
 
-    print('Generating summary tables and plots across all defined outcomes and attributes.')
-    ed_pts = m4exp.assign_age_groups(ed_pts, bins=age_bins, labels=age_labels, use_lazy=args.lazy)
-    for (outcome, label) in zip(outcomes, outcome_labels, strict=False):
+    print(
+        "Generating summary tables and plots across all defined outcomes and attributes."
+    )
+    ed_pts = m4exp.assign_age_groups(
+        ed_pts, bins=age_bins, labels=age_labels, use_lazy=args.lazy
+    )
+    for outcome, label in zip(outcomes, outcome_labels, strict=False):
         print(f"Generating summary table one by {outcome}..")
-        m4exp.get_table_one(ed_pts, outcome, label, args.output_path, args.display_dict_path, 
-                            sensitive_attr_list=attribute_labels, nn_attr=nn_attr,
-                            verbose=args.verbose, adjust_method=args.pval_adjust,
-                            cat_cols=categorical)
+        m4exp.get_table_one(
+            ed_pts,
+            outcome,
+            label,
+            args.output_path,
+            args.display_dict_path,
+            sensitive_attr_list=attribute_labels,
+            nn_attr=nn_attr,
+            verbose=args.verbose,
+            adjust_method=args.pval_adjust,
+            cat_cols=categorical,
+        )
     print("Plotting outcome distribution by sensitive attributes..")
-    for (attribute, label) in zip(attributes, attribute_labels, strict=False):
-        m4exp.plot_outcome_dist_by_sensitive_attr(ed_pts, attribute, label, args.output_path,
-                                                  outcomes, outcome_labels, maxi=args.max_i, 
-                                                  maxj=args.max_j, rot=args.rot,
-                                                  figsize=(8, 8))
+    for attribute, label in zip(attributes, attribute_labels, strict=False):
+        m4exp.plot_outcome_dist_by_sensitive_attr(
+            ed_pts,
+            attribute,
+            label,
+            args.output_path,
+            outcomes,
+            outcome_labels,
+            maxi=args.max_i,
+            maxj=args.max_j,
+            rot=args.rot,
+            figsize=(8, 8),
+        )
     print("Plotting age distribution by sensitive attributes..")
-    for (attribute, label) in zip(attributes, attribute_labels, strict=False):
-        m4exp.plot_age_dist_by_sensitive_attr(ed_pts, attribute, label, args.output_path,
-                                                  outcomes, outcome_labels, labels=age_labels,
-                                                  maxi=args.max_i, maxj=args.max_j, 
-                                                  rot=args.rot,
-                                                  figsize=(8, 8))
+    for attribute, label in zip(attributes, attribute_labels, strict=False):
+        m4exp.plot_age_dist_by_sensitive_attr(
+            ed_pts,
+            attribute,
+            label,
+            args.output_path,
+            outcomes,
+            outcome_labels,
+            labels=age_labels,
+            maxi=args.max_i,
+            maxj=args.max_j,
+            rot=args.rot,
+            figsize=(8, 8),
+        )
     print("Plotting distribution of BHC token lengths by outcome and attributes..")
-    m4exp.plot_token_length_by_attribute(ed_pts, args.output_path, attributes, attribute_labels,
-                                maxi=args.max_i, maxj=args.max_j, rot=args.rot,
-                                figsize=(8, 13), test_type=args.pval_test)
-    m4exp.plot_token_length_by_attribute(ed_pts, args.output_path, outcomes, outcome_labels,
-                                         out_fname=args.bhc_fname,
-                                maxi=args.max_i, maxj=args.max_j, rot=args.rot,
-                                figsize=(8, 8), test_type=args.pval_test, 
-                                gr_pairs={'in_hosp_death': [('N', 'Y')], 
-                                        'ext_stay_7': [('N', 'Y')], 
-                                        'non_home_discharge': [('N', 'Y')], 
-                                        'icu_admission': [('N', 'Y')]},
-                                        outcome_mode=True)
+    m4exp.plot_token_length_by_attribute(
+        ed_pts,
+        args.output_path,
+        attributes,
+        attribute_labels,
+        maxi=args.max_i,
+        maxj=args.max_j,
+        rot=args.rot,
+        figsize=(8, 13),
+        test_type=args.pval_test,
+    )
+    m4exp.plot_token_length_by_attribute(
+        ed_pts,
+        args.output_path,
+        outcomes,
+        outcome_labels,
+        out_fname=args.bhc_fname,
+        maxi=args.max_i,
+        maxj=args.max_j,
+        rot=args.rot,
+        figsize=(8, 8),
+        test_type=args.pval_test,
+        gr_pairs={
+            "in_hosp_death": [("N", "Y")],
+            "ext_stay_7": [("N", "Y")],
+            "non_home_discharge": [("N", "Y")],
+            "icu_admission": [("N", "Y")],
+        },
+        outcome_mode=True,
+    )
     print("Finished data exploration.")

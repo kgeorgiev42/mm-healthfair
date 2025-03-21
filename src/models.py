@@ -108,7 +108,7 @@ class MMModel(L.LightningModule):
             nt_embed_dim = 0
 
         if self.fusion_method == "mag":
-            #print('Using MAG layer.')
+            # print('Using MAG layer.')
             if self.st_first:
                 self.fuse = Gate(
                     st_embed_dim, *([ts_embed_dim] * self.num_ts), dropout=dropout
@@ -123,7 +123,7 @@ class MMModel(L.LightningModule):
 
         elif self.fusion_method == "concat":
             # embeddings must be same dim
-            #print('Using Concat layer.')
+            # print('Using Concat layer.')
             assert st_embed_dim == ts_embed_dim
             if self.with_notes:
                 assert nt_embed_dim == st_embed_dim
@@ -154,7 +154,7 @@ class MMModel(L.LightningModule):
                 lengths = batch[3]
 
         if self.fusion_method != "None":
-            #print('Packing padded sequences.')
+            # print('Packing padded sequences.')
             ts_embed = []
             for i in range(self.num_ts):
                 if self.with_packed_sequences:
@@ -189,7 +189,7 @@ class MMModel(L.LightningModule):
                 out = self.fuse(*ts_embed, st_embed)
 
         elif self.fusion_method == "None":
-            #print('No fusion method specified. Using static data only.')
+            # print('No fusion method specified. Using static data only.')
             out = st_embed.squeeze()
 
         # Parse through FC
