@@ -15,8 +15,8 @@ def get_table_one(ed_pts: pl.DataFrame | pl.LazyFrame,
                   outcome_label: str,
                   output_path: str = '../outputs/reference',
                   disp_dict_path: str = '../outputs/reference/feat_name_map.json',
-                sensitive_attr_list: list = ['Sex', 'Ethnicity', 'Marital Status', 'Insurance'],
-                nn_attr: list = ['Age', '# historical discharge notes', '# Raw Input Tokens', '# Processed Input Tokens'],
+                sensitive_attr_list: list = 'None',
+                nn_attr: list = 'None',
                 adjust_method = 'bonferroni',
                 cat_cols: list = None,
                 verbose: bool = False) -> TableOne:
@@ -53,8 +53,8 @@ def get_table_one(ed_pts: pl.DataFrame | pl.LazyFrame,
 
 def assign_age_groups(ed_pts: pl.DataFrame | pl.LazyFrame, 
                       age_col: str = 'anchor_age', 
-                      bins: list = [18, 49, 59, 69, 79, 91], 
-                      labels: list = ['<50', '50-59', '60-69', '70-79', '80+'],
+                      bins: list = None, 
+                      labels: list = None,
                       use_lazy: bool = False) -> pl.DataFrame:
     """
     Assign age groups to patients based on age column.
@@ -93,17 +93,20 @@ def plot_outcome_dist_by_sensitive_attr(ed_pts: pl.DataFrame | pl.LazyFrame,
                                         attr_col: str,
                                         attr_xlabel: str, 
                                         output_path: str = '../outputs/reference', 
-                                        outcome_list: list = ['in_hosp_death', 'ext_stay_7', 'non_home_discharge', 'icu_admission'],
-                                        outcome_title: list = ['In-hospital Death', 'Extended Hospital Stay', 'Non-home Discharge', 'ICU Admission'],
-                                        outcome_legend: dict = {'In-hospital Death': ['No', 'Yes'], 'Extended Hospital Stay': ['No', 'Yes'],
-                                                    'Non-home Discharge': ['No', 'Yes'], 'ICU Admission': ['No', 'Yes']},
+                                        outcome_list: list = None,
+                                        outcome_title: list = None,
+                                        outcome_legend: dict = None,
                                         maxi: int=2, maxj: int=2,
                                         rot: int=0, 
                                         figsize: tuple = (8,6), 
-                                        palette: list = ['#1f77b4', '#ff7f0e']):
+                                        palette: list = None):
     """
     Plots distribution of health outcomes by specified sensitive attribute.
     """
+    ### Edit when customising outcomes
+    outcome_legend = {'In-hospital Death': ['No', 'Yes'], 'Extended Hospital Stay': ['No', 'Yes'],
+                       'Non-home Discharge': ['No', 'Yes'], 'ICU Admission': ['No', 'Yes']}
+    palette = ['#1f77b4', '#ff7f0e']
     if isinstance(ed_pts, pl.LazyFrame):
         ed_pts = ed_pts.collect()
     ### Set plot config
@@ -144,16 +147,18 @@ def plot_age_dist_by_sensitive_attr(ed_pts: pl.DataFrame | pl.LazyFrame,
                                     attr_col: str,
                                     attr_xlabel: str, 
                                     output_path: str = '../outputs/reference', 
-                                    outcome_list: list = ['in_hosp_death', 'ext_stay_7', 'non_home_discharge','icu_admission'],
-                                    outcome_title: list = ['In-hospital Death', 'Extended Hospital Stay', 'Non-home Discharge', 'ICU Admission'],
+                                    outcome_list: list = None,
+                                    outcome_title: list = None,
                                     maxi: int=2, maxj: int=2,
-                                    colors: list = ['#fef0d9', '#fdcc8a', '#fc8d59', '#e34a33', '#b30000'],
-                                    labels: list = ['<50', '50-59', '60-69', '70-79', '80+'],
+                                    colors: list = None,
+                                    labels: list = None,
                                     figsize: tuple = (12,8), 
                                     rot: int=0):
     """
     Plots distribution of age by specified sensitive attribute.
     """
+    ### Edit when customising outcomes
+    colors = ['#fef0d9', '#fdcc8a', '#fc8d59', '#e34a33', '#b30000']
     if isinstance(ed_pts, pl.LazyFrame):
         ed_pts = ed_pts.collect()
     ### Set plot config
@@ -205,26 +210,27 @@ def plot_age_dist_by_sensitive_attr(ed_pts: pl.DataFrame | pl.LazyFrame,
 
 def plot_token_length_by_attribute(ed_pts: pl.DataFrame | pl.LazyFrame, 
                                   output_path: str = '../outputs/reference',
-                                    sensitive_attr_list: list = ['gender', 'insurance', 'race_group', 'marital_status'],
-                                    attr_title: list = ['Gender', 'Insurance type', 'Ethnicity', 'Marital status'],
+                                    sensitive_attr_list: list = None,
+                                    attr_title: list = None,
                                     out_fname: str = 'bhc_dist_by_attr.png',
                                     maxi: int=2, maxj: int=2,
                                     figsize: tuple=(8,6), rot: int=0, ylim: tuple=(0,12),
-                                    gr_pairs: dict = {'gender': [('M', 'F')], 
-                                              'insurance': [('Medicare', 'Medicaid'), ('Medicare', 'Private'), ('Medicaid', 'Private')],
-                                              'race_group': [('White', 'Black'), ('White', 'Hispanic/Latino'), ('White', 'Asian'),
-                                                             ('Black', 'Hispanic/Latino'), ('Black', 'Asian'), ('Hispanic/Latino', 'Asian')],
-                                              'marital_status': [('Divorced', 'Single'), ('Divorced', 'Married'), ('Divorced', 'Widowed'),
-                                                                 ('Single', 'Married'), ('Single', 'Widowed'), ('Married', 'Widowed')],
-                                              },
+                                    gr_pairs: dict = None,
                                     suptitle: str = 'BHC token length by sensitive variable in patients with ED attendance.',
                                     outcome_mode: bool = False,
-                                    unique_value_order: list = ['N', 'Y'],
+                                    unique_value_order: list = None,
                                     adjust_method: str = 'bonferroni',
                                     test_type: str = 't-test_welch'):
     """"
     Displays violin plots of aggregated BHC token length by sensitive attribute.
     """
+    ### Edit when customising outcomes
+    unique_value_order = ['N', 'Y']
+    gr_pairs = {'gender': [('M', 'F')], 'insurance': [('Medicare', 'Medicaid'), ('Medicare', 'Private'), ('Medicaid', 'Private')],
+                'race_group': [('White', 'Black'), ('White', 'Hispanic/Latino'), ('White', 'Asian'),
+                                            ('Black', 'Hispanic/Latino'), ('Black', 'Asian'), ('Hispanic/Latino', 'Asian')],
+                'marital_status': [('Divorced', 'Single'), ('Divorced', 'Married'), ('Divorced', 'Widowed'),
+                                             ('Single', 'Married'), ('Single', 'Widowed'), ('Married', 'Widowed')]}
     if isinstance(ed_pts, pl.LazyFrame):
         ed_pts = ed_pts.collect()
 

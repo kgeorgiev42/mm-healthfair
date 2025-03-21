@@ -338,15 +338,7 @@ def get_notes_population(adm_notes: pl.DataFrame | pl.LazyFrame,
 def read_omr_table(
     mimic4_path: str, admits_last: pl.DataFrame | pl.LazyFrame, 
     use_lazy: bool = False,
-    vitalsign_uom_map: dict = {
-            "Temperature": "°F",
-            "Heart rate": "bpm",
-            "Respiratory rate": "insp/min",
-            "Oxygen saturation": "%",
-            "Systolic blood pressure": "mmHg",
-            "Diastolic blood pressure": "mmHg",
-            "BMI": "kg/m²"
-        }
+    vitalsign_uom_map: dict = None
 ) -> pl.LazyFrame | pl.DataFrame:
     """Reads in omr.csv.gz table and formats column types.
     Sets measures for blood pressure and BMI in long format.
@@ -358,6 +350,15 @@ def read_omr_table(
     Returns:
         pl.LazyFrame | pl.DataFrame: Omr table.
     """
+    vitalsign_uom_map = {
+            "Temperature": "°F",
+            "Heart rate": "bpm",
+            "Respiratory rate": "insp/min",
+            "Oxygen saturation": "%",
+            "Systolic blood pressure": "mmHg",
+            "Diastolic blood pressure": "mmHg",
+            "BMI": "kg/m²"
+    }
     if isinstance(admits_last, pl.LazyFrame):
         admits_last = admits_last.collect()
 
@@ -405,22 +406,8 @@ def read_omr_table(
 
 def read_vitals_table(
     mimic4_ed_path: str, admits_last: pl.DataFrame | pl.LazyFrame, 
-    use_lazy: bool = False, vitalsign_column_map: dict = {
-            "temperature": "Temperature",
-            "heartrate": "Heart rate",
-            "resprate": "Respiratory rate",
-            "o2sat": "Oxygen saturation",
-            "sbp": "Systolic blood pressure",
-            "dbp": "Diastolic blood pressure"},
-            vitalsign_uom_map: dict = {
-            "Temperature": "°F",
-            "Heart rate": "bpm",
-            "Respiratory rate": "insp/min",
-            "Oxygen saturation": "%",
-            "Systolic blood pressure": "mmHg",
-            "Diastolic blood pressure": "mmHg",
-            "BMI": "kg/m²"
-        }
+    use_lazy: bool = False, vitalsign_column_map: dict = None,
+            vitalsign_uom_map: dict = None
 ) -> pl.LazyFrame | pl.DataFrame:
     """Reads in vitalsign.csv.gz table and formats column types.
 
@@ -431,6 +418,24 @@ def read_vitals_table(
     Returns:
         pl.LazyFrame | pl.DataFrame: Vitals table.
     """
+    vitalsign_uom_map = {
+            "Temperature": "°F",
+            "Heart rate": "bpm",
+            "Respiratory rate": "insp/min",
+            "Oxygen saturation": "%",
+            "Systolic blood pressure": "mmHg",
+            "Diastolic blood pressure": "mmHg",
+            "BMI": "kg/m²"
+    }
+    vitalsign_column_map = {
+            "temperature": "Temperature",
+            "heartrate": "Heart rate",
+            "resprate": "Respiratory rate",
+            "o2sat": "Oxygen saturation",
+            "sbp": "Systolic blood pressure",
+            "dbp": "Diastolic blood pressure"
+    }
+    
     if isinstance(admits_last, pl.LazyFrame):
         admits_last = admits_last.collect()
 

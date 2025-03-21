@@ -257,15 +257,7 @@ def encode_categorical_features(ehr_data: pl.DataFrame) -> pl.DataFrame:
     return ehr_data
 
 def extract_lookup_fields(ehr_data: pl.DataFrame,
-                          lookup_list: list = ['hadm_id', 'yob', 'dod', 'admittime',
-                                               'dischtime', 'deathtime', 'edregtime',
-                                               'intime', 'outtime',
-                                               'edouttime', 'admission_location',
-                                               'discharge_location', 'los_days',
-                                               'icu_los_days', 'ltc_code',
-                                               'num_summaries', 'num_input_tokens',
-                                               'num_target_tokens', 'num_measures',
-                                               'total_proc_count'],
+                          lookup_list: list = None,
                           lookup_output_path: str = '../outputs/reference') -> pl.DataFrame:
     """Extract dates and summary fields not suitable for training in a separate dataframe.
 
@@ -282,12 +274,7 @@ def extract_lookup_fields(ehr_data: pl.DataFrame,
     return ehr_data
 
 def remove_correlated_features(ehr_data: pl.DataFrame,
-                          feats_to_save: list = ['anchor_age', 'gender_F', 
-                                                 'race_group_Hispanic_Latino', 'race_group_Black', 'race_group_White',
-                                                 'race_group_Asian', 'race_group_Other',
-                                                 'marital_status_Married', 'marital_status_Single', 'marital_status_Widowed', 'marital_status_Divorced',
-                                                 'insurance_Medicare', 'insurance_Medicaid', 'insurance_Private', 'insurance_Other',
-                                                 'in_hosp_death', 'ext_stay_7', 'icu_admission', 'non_home_discharge'],
+                          feats_to_save: list = None,
                           threshold: float = 0.9,
                           method: str = 'pearson',
                           verbose: bool = True) -> pl.DataFrame:
@@ -340,21 +327,9 @@ def generate_train_val_test_set(ehr_data: pl.DataFrame,
                                 train_ratio: float = 0.8,
                                 val_ratio: float = 0.1,
                                 test_ratio: float = 0.1,
-                                cont_cols: list=['Age'],
-                                nn_cols: list=['Age'],
-                                disp_dict: dict={
-                                    'anchor_age': 'Age',
-                                    'gender': 'Gender',
-                                    'race_group': 'Ethnicity',
-                                    'insurance': 'Insurance',
-                                    'marital_status': 'Marital status',
-                                    'in_hosp_death': 'In-hospital death',
-                                    'ext_stay_7': 'Extended stay',
-                                    'non_home_discharge': 'Non-home discharge',
-                                    'icu_admission': 'ICU admission',
-                                    'is_multimorbid': 'Multimorbidity',
-                                    'is_complex_multimorbid': 'Complex multimorbidity'
-                                },
+                                cont_cols: list = None,
+                                nn_cols: list = None,
+                                disp_dict: dict = None,
                                 stratify: bool = True,
                                 verbose: bool = True) -> dict:
     """Create train/val/test split from static EHR dataset and save the patient IDs in separate files.
@@ -365,6 +340,24 @@ def generate_train_val_test_set(ehr_data: pl.DataFrame,
     Returns:
         pl.DataFrame: Transformed EHR data.
     """
+    ### Define display dictionary
+    disp_dict = {'anchor_age': 'Age',
+                'gender': 'Gender',
+                'race_group': 'Ethnicity',
+                'insurance': 'Insurance',
+                'marital_status': 'Marital status',
+                'in_hosp_death': 'In-hospital death',
+                'ext_stay_7': 'Extended stay',
+                'non_home_discharge': 'Non-home discharge',
+                'icu_admission': 'ICU admission',
+                'is_multimorbid': 'Multimorbidity',
+                'is_complex_multimorbid': 'Complex multimorbidity'}
+    cont_cols = ['Age']
+    nn_cols = ['Age']
+    cat_cols = ['In-hospital death','Extended stay',
+                'Non-home discharge','ICU admission',
+                'Multimorbidity','Complex multimorbidity']
+    
     ### Set stratification columns to include sensitive attributes + target outcome
     ehr_data = ehr_data.to_pandas()
     if stratify:
@@ -400,7 +393,7 @@ def generate_train_val_test_set(ehr_data: pl.DataFrame,
         print(f'Created split with {train_x.shape[0]}({round(train_x.shape[0]/len(ehr_data), 2)*100}%) samples in train, {val_x.shape[0]}({round(val_x.shape[0]/len(ehr_data), 2)*100}%) samples in validation, and {test_x.shape[0]}({round(test_x.shape[0]/len(ehr_data), 2)*100}%) samples in test.')
         print('Getting summary statistics for split...')
         get_train_split_summary(train_x, val_x, test_x, outcome_col, output_summary_path, 
-                                cont_cols, nn_cols, disp_dict, verbose=verbose)
+                                cont_cols, nn_cols, disp_dict, cat_cols, verbose=verbose)
         print(f'Saving train/val/test split IDs to {output_path}')
         
     ### Save patient IDs

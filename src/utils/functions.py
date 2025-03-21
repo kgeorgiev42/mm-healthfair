@@ -209,24 +209,10 @@ def get_train_split_summary(train: pd.DataFrame,
                               test: pd.DataFrame,
                               outcome: str="in_hosp_death",
                               output_path: str="../outputs/exp_data",
-                              cont_cols: list=['Age'],
-                              nn_cols: list=['Age'],
-                              disp_dict: dict={
-                                'anchor_age': 'Age',
-                                'gender': 'Gender',
-                                'race_group': 'Ethnicity',
-                                'insurance': 'Insurance',
-                                'marital_status': 'Marital status',
-                                'in_hosp_death': 'In-hospital death',
-                                'ext_stay_7': 'Extended stay',
-                                'non_home_discharge': 'Non-home discharge',
-                                'icu_admission': 'ICU admission',
-                                'is_multimorbid': 'Multimorbidity',
-                                'is_complex_multimorbid': 'Complex multimorbidity'
-                            },
-                            cat_cols = ['In-hospital death','Extended stay',
-                                'Non-home discharge','ICU admission',
-                                'Multimorbidity','Complex multimorbidity'],
+                              cont_cols: list=None,
+                              nn_cols: list=None,
+                              disp_dict: dict=None,
+                              cat_cols: list=None,
                             verbose: bool=True) -> None:
     
     """Helper function to print statistical train-validation-test split summary."""
