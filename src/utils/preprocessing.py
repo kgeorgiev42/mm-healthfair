@@ -659,7 +659,7 @@ def process_text_to_embeddings(notes: pl.DataFrame) -> dict:
             truncation=True,
             padding=True,
             max_length=128,
-            return_attention_mask=False,
+            return_attention_mask=True,
         ).to(device)
 
         # Generate embeddings for all sentences in a single forward pass
@@ -672,7 +672,11 @@ def process_text_to_embeddings(notes: pl.DataFrame) -> dict:
         else:
             embeddings = np.zeros((768,))  # Handle case with no sentences
 
-        embeddings_dict[subj_id] = embeddings
+        # Map each sentence to its embedding
+        sentence_embedding_pairs = list(zip(sentences, embeddings))
+
+        # Store the mapping in the dictionary
+        embeddings_dict[subj_id] = sentence_embedding_pairs
 
     return embeddings_dict
 
@@ -834,7 +838,7 @@ def generate_interval_dataset(
             missing_event_src += 1
             continue
 
-        write_data, ts_data_list = _process_patient_events(
+        write_data, ts_data_list, s_ec, s_et = _process_patient_events(
             pt_events,
             feature_map,
             freq,
@@ -847,6 +851,14 @@ def generate_interval_dataset(
             no_resample,
             max_elapsed,
         )
+
+        if s_ec:
+            filter_by_nb_events += 1
+            continue
+
+        if s_et:
+            filter_by_elapsed_time += 1
+            continue
 
         if write_data:
             data_dict[id_val] = {"static": ehr_static}
@@ -894,13 +906,16 @@ def _process_patient_events(
 ) -> tuple[bool, list[pl.DataFrame]]:
     write_data = True
     ts_data_list = []
+    skipped_due_to_event_count = False
+    skipped_due_to_elapsed_time = False
 
     for events_by_src in pt_events.partition_by("linksto"):
         src = events_by_src.select(pl.first("linksto")).item()
         timeseries = convert_events_to_timeseries(events_by_src)
 
         if not _validate_event_count(timeseries, min_events, max_events):
-            return False, []
+            skipped_due_to_event_count = True
+            return False, [], skipped_due_to_event_count
 
         timeseries = _handle_missing_features(timeseries, feature_map[src])
         timeseries, ehr_static = _impute_missing_values(timeseries, ehr_static, impute)
@@ -914,7 +929,8 @@ def _process_patient_events(
         if max_elapsed is not None:
             timeseries = add_time_elapsed_to_events(timeseries, edregtime)
             if timeseries.filter(pl.col("elapsed") <= max_elapsed).shape[0] == 0:
-                return False, []
+                skipped_due_to_elapsed_time = True
+                return False, [], skipped_due_to_elapsed_time
 
         ts_data_list.append(timeseries.select(feature_map[src]))
 
