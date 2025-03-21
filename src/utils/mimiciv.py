@@ -1,9 +1,15 @@
 import os
 
 import numpy as np
-import polars as pl
 import pandas as pd
-from utils.preprocessing import clean_labevents, prepare_medication_features, rename_fields, transform_sensitive_attributes
+import polars as pl
+from utils.preprocessing import (
+    clean_labevents,
+    prepare_medication_features,
+    rename_fields,
+    transform_sensitive_attributes,
+)
+
 
 def read_admissions_table(
     mimic4_path: str, use_lazy: bool = False, verbose: bool = True,
@@ -77,7 +83,7 @@ def read_admissions_table(
     if verbose:
         print(f'Subjects with extended stay > 7 days: {admits.filter(pl.col("ext_stay_7") == 1).select("subject_id").n_unique()}, % of pts: {admits.filter(pl.col("ext_stay_7") == 1).select("subject_id").n_unique() / admits.select("subject_id").n_unique() * 100:.2f}')
 
-    print(f'Collected admissions table and linked ED attendances..')
+    print('Collected admissions table and linked ED attendances..')
     return admits.lazy() if use_lazy else admits
 
 def read_patients_table(
@@ -491,7 +497,7 @@ def read_labevents_table(
 
     #  Load in csv using polars lazy API (requires table to be in csv format)
     labs_data = pl.scan_csv(
-        os.path.join(mimic4_path, f"labevents.csv"), try_parse_dates=True
+        os.path.join(mimic4_path, "labevents.csv"), try_parse_dates=True
     )
     d_items = (pl.read_csv(os.path.join(mimic4_path, "d_labitems.csv.gz")).lazy().select(["itemid", "label"]))
     # merge labitem id's with dict
@@ -508,7 +514,7 @@ def read_labevents_table(
     # get most common items (sample file contains top 50 itemids)
     if include_items is not None:
         # read txt file containing list of ids
-        with open(include_items, 'r') as f:
+        with open(include_items) as f:
             lab_items = list(f.read().splitlines())
         labs_data = labs_data.filter(pl.col("itemid").cast(pl.Utf8).is_in(set(lab_items)))
 

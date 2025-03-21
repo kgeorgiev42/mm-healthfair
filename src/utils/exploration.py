@@ -1,14 +1,16 @@
-import numpy as np
-import polars as pl
-import pandas as pd
-import matplotlib.pyplot as plt
-import matplotlib.ticker as mtick
-from matplotlib.patches import Patch
-import seaborn as sns
-from tableone import TableOne
 import json
 import os
+
+import matplotlib.pyplot as plt
+import matplotlib.ticker as mtick
+import numpy as np
+import pandas as pd
+import polars as pl
+import seaborn as sns
+from matplotlib.patches import Patch
 from statannotations.Annotator import Annotator
+from tableone import TableOne
+
 
 def get_table_one(ed_pts: pl.DataFrame | pl.LazyFrame,  
                   outcome: str,
@@ -28,7 +30,7 @@ def get_table_one(ed_pts: pl.DataFrame | pl.LazyFrame,
     else:
         ed_pts = ed_pts.to_pandas()
     ### Load dictionary containing display names for features
-    with open(disp_dict_path, 'r') as f:
+    with open(disp_dict_path) as f:
         disp_dict = json.load(f)
     ### Infer categorical data if not specified
     if cat_cols is None:

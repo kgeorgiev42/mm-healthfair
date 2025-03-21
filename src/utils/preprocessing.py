@@ -1,14 +1,20 @@
-import numpy as np
-import polars as pl
-import pandas as pd
-import spacy
 import json
 import os
+
+import numpy as np
+import pandas as pd
+import polars as pl
+import spacy
 import torch
-from tqdm import tqdm
 from sklearn.model_selection import train_test_split
+from tqdm import tqdm
 from transformers import AutoModel, AutoTokenizer
-from utils.functions import read_icd_mapping, contains_both_ltc_types, rename_fields, get_train_split_summary
+from utils.functions import (
+    contains_both_ltc_types,
+    get_train_split_summary,
+    read_icd_mapping,
+    rename_fields,
+)
 
 ###############################
 # EHR data preprocessing
@@ -76,7 +82,7 @@ def preproc_icd_module(diagnoses: pl.DataFrame | pl.LazyFrame,
     diagnoses = diagnoses.select(['subject_id', 'hadm_id', 'seq_num', 'long_title', 'root_icd10_convert'])
     #### Create features for long-term chronic conditions
     if ltc_dict_path:
-        with open(ltc_dict_path, 'r') as json_dict:
+        with open(ltc_dict_path) as json_dict:
             ltc_dict = json.load(json_dict)
         ### Initialise long-term condition column
         diagnoses = diagnoses.with_columns(pl.lit('Undefined').alias('ltc_code').cast(pl.Utf8))
@@ -116,7 +122,7 @@ def get_ltc_features(admits_last: pl.DataFrame | pl.LazyFrame,
     
     ### If dict is populated generate categorical columns for each long-term condition
     if ltc_dict_path:
-        with open(ltc_dict_path, 'r') as json_dict:
+        with open(ltc_dict_path) as json_dict:
             ltc_dict = json.load(json_dict)
         for ltc_code, _ in ltc_dict.items():
             diag_flat = diag_flat.with_columns(
@@ -621,7 +627,7 @@ def generate_interval_dataset(ehr_static: pl.DataFrame, ts_data: pl.DataFrame,
 
         if write_data:
             data_dict[id_val] = {"static": ehr_static}
-            for idx, ts in enumerate(ts_data_list):
+            for _, ts in enumerate(ts_data_list):
                 key = "dynamic_0" if ts.columns == vitals_lkup else "dynamic_1"
                 data_dict[id_val][key] = ts
             n += 1

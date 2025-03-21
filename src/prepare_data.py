@@ -1,22 +1,20 @@
 import argparse
 import glob
 import os
-import pickle
 import sys
-import toml
 
 import polars as pl
+import toml
 from tqdm import tqdm
 from utils.functions import save_pickle
 from utils.preprocessing import (
     clean_notes,
     encode_categorical_features,
-    process_text_to_embeddings,
-    generate_train_val_test_set,
-    remove_correlated_features,
     extract_lookup_fields,
-    encode_categorical_features,
-    generate_interval_dataset
+    generate_interval_dataset,
+    generate_train_val_test_set,
+    process_text_to_embeddings,
+    remove_correlated_features,
 )
 
 parser = argparse.ArgumentParser(

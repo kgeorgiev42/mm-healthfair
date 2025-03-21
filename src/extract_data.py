@@ -1,16 +1,20 @@
 import argparse
-import os
-import sys
-import shutil
 import gzip
+import os
+import shutil
+import sys
+import warnings
+
 import numpy as np
 import polars as pl
-import warnings
-from tqdm import tqdm
-
 import utils.mimiciv as m4c
-from utils.preprocessing import preproc_icd_module, get_ltc_features
-from utils.functions import get_n_unique_values, get_final_episodes, get_demographics_summary
+from utils.functions import (
+    get_demographics_summary,
+    get_final_episodes,
+    get_n_unique_values,
+)
+from utils.preprocessing import get_ltc_features, preproc_icd_module
+
 warnings.filterwarnings("ignore", category=pl.exceptions.MapWithoutReturnDtypeWarning)
 
 if __name__ == "__main__":
@@ -166,10 +170,10 @@ if __name__ == "__main__":
         print('Getting lab test measures..')
         
         # read compressed and write to file since lazy polars API can only scan uncompressed csv's
-        if not os.path.exists(os.path.join(mimic4_path, f"labevents.csv")):
-            print(f"Uncompressing labevents data... (required)")
-            with gzip.open(os.path.join(mimic4_path, f"labevents.csv.gz"), "rb") as f_in:
-                with open(os.path.join(mimic4_path, f"labevents.csv"), "wb") as f_out:
+        if not os.path.exists(os.path.join(mimic4_path, "labevents.csv")):
+            print("Uncompressing labevents data... (required)")
+            with gzip.open(os.path.join(mimic4_path, "labevents.csv.gz"), "rb") as f_in:
+                with open(os.path.join(mimic4_path, "labevents.csv"), "wb") as f_out:
                     shutil.copyfileobj(f_in, f_out)
 
         labs = m4c.read_labevents_table(mimic4_path, admits_last, include_items=args.labitems)
