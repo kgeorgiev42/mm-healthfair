@@ -21,7 +21,7 @@ def load_pickle(filepath: str) -> Any:
     return data
 
 def save_pickle(target: dict, filepath: str,
-                fname: str="processed_data.pkl") -> Any:
+                fname: str="mm_feat.pkl") -> Any:
     """Save a pickled object from a dictionary.
 
     Args:

@@ -49,6 +49,12 @@ parser.add_argument(
     help="Directory to save lookup table file containing dates and additional fields from EHR data.",
 )
 parser.add_argument(
+    "--pkl_fname",
+    type=str,
+    default="mmfair_feat.pkl",
+    help="Name of pickle file to save processed data.",
+)
+parser.add_argument(
     "--config",
     "-c",
     type=str,
@@ -107,7 +113,7 @@ parser.add_argument(
     help="Ratio of training data to create split.",
 )
 parser.add_argument(
-    "--stratify", action="store_true", default=True, help="Whether to stratify the split by outcome and sensitive attributes."
+    "--stratify", action="store_true", default=False, help="Whether to stratify the split by outcome and sensitive attributes."
 )
 parser.add_argument(
     "--seed", type=int, default=0, help="Seed for random sampling. Defaults to 0."
@@ -160,31 +166,22 @@ outcomes = config["outcomes"]["labels"]
 lookup = config["attributes"]["lookup"]
 vitals_freq = config["timeseries"]["vitals_freq"]
 lab_freq = config["timeseries"]["lab_freq"]
+vitals = config["attributes"]["vitals"]
 ## Features to save within EHR data (not candidates for exclusion due to high correlation)
 feats_to_save = config["attributes"]["feats_to_save"]
 
-print("START TRAIN-VAL-TEST SPLIT")
-print("---------------------------------")
-#### TRAIN-VAL-TEST SPLIT ####
-for outcome in outcomes:
-    print(f"Processing splits for outcome: {outcome}")
-    generate_train_val_test_set(ehr_data, args.output_dir, outcome, args.output_summary_dir,
-                                args.seed, args.train_ratio, (1 - args.train_ratio)/2, 
-                                (1 - args.train_ratio)/2, stratify=args.stratify,
-                                verbose=args.verbose)
-print("---------------------------------")
-print("Finished train/val/test split creation.")
+
 print("---------------------------------")
 print("START STATIC DATA PREPROCESSING")
 print("---------------------------------")
 #### STATIC DATA PREPROCESSING ####
 if args.verbose:
     print("Preprocessing static EHR data for training..")
-    ehr_data = encode_categorical_features(ehr_data)
+    ehr_proc = encode_categorical_features(ehr_data)
     ### Save edregtime for time-series processing
-    ehr_regtime = ehr_data.select(["subject_id", "edregtime"])
-    ehr_data = extract_lookup_fields(ehr_data, lookup, lookup_output_path=args.output_reference_dir)
-    ehr_data = remove_correlated_features(ehr_data, feats_to_save, threshold=args.corr_threshold, 
+    ehr_regtime = ehr_proc.select(["subject_id", "edregtime"])
+    ehr_proc = extract_lookup_fields(ehr_proc, lookup, lookup_output_path=args.output_reference_dir)
+    ehr_proc = remove_correlated_features(ehr_proc, feats_to_save, threshold=args.corr_threshold, 
                                           method=args.corr_method,
                                           verbose=args.verbose)
 print("---------------------------------")
@@ -195,11 +192,11 @@ print("---------------------------------")
 events = events.collect(streaming=True)
 # get all features expected for each event data source and set sampling freq
 print(f"Imputing missing values using strategy: {args.impute}")
-feature_dict = generate_interval_dataset(ehr_data, events, ehr_regtime,
+feature_dict = generate_interval_dataset(ehr_proc, events, ehr_regtime,
                                             vitals_freq, lab_freq,
                                             args.min_events, args.max_events,
                                             args.impute, args.include_dyn_mean, args.no_resample,
-                                            args.max_elapsed, args.verbose)
+                                            args.max_elapsed, vitals, args.verbose)
 print("---------------------------------")
 #### NOTES PREPROCESSING ###
 if args.include_notes:
@@ -220,14 +217,30 @@ if args.include_notes:
     # Add embeddings to feature dictionary
     if args.verbose:
         print("Appending embeddings to feature dictionary..")
-    for k,v in feature_dict.items():
-        id_val = v["subject_id"]
+    for id_val in tqdm(notes.unique("subject_id").get_column("subject_id").to_list(),
+            desc="Linking note embeddings to feature dictionary...",
+    ):
+        if id_val not in embeddings.keys() or id_val not in feature_dict.keys():
+            continue
         feature_dict[id_val]["notes"] = embeddings[id_val]
+
+print("START TRAIN-VAL-TEST SPLIT")
+print("---------------------------------")
+#### TRAIN-VAL-TEST SPLIT ####
+for outcome in outcomes:
+    print(f"Processing splits for outcome: {outcome}")
+    ehr_data = ehr_data.filter(pl.col("subject_id").is_in(feature_dict.keys()))
+    generate_train_val_test_set(ehr_data, args.output_dir, outcome, args.output_summary_dir,
+                                args.seed, args.train_ratio, (1 - args.train_ratio)/2, 
+                                (1 - args.train_ratio)/2, stratify=args.stratify,
+                                verbose=args.verbose)
+print("---------------------------------")
+print("Finished train/val/test split creation.")
 print("---------------------------------")
 # Preview example data
 #example_id = list(data_dict.keys())[-1]
 #print(f"Example data:\n\t{data_dict[example_id]}")
 print(f"Feature preparation successful. Exporting prepared features to {output_dir}..")
 # Save dictionary to disk
-save_pickle(feature_dict, output_dir, "processed_data.pkl")
+save_pickle(feature_dict, output_dir, args.pkl_fname)
 print("Finished feature preparation for multimodal learning.")

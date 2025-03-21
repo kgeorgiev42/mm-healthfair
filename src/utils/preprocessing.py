@@ -385,8 +385,8 @@ def generate_train_val_test_set(ehr_data: pl.DataFrame,
         train_x, test_x, train_y, test_y = train_test_split(ehr_data.drop([outcome_col], axis=1), ehr_data[outcome_col], 
                                                             test_size=(1 - train_ratio), 
                                                             random_state=seed)
-        val_x, test_x, val_y, test_y = train_test_split(test_x.drop([outcome_col], axis=1), 
-                                                        test_x[outcome_col],
+        val_x, test_x, val_y, test_y = train_test_split(test_x, 
+                                                        test_y,
                                                         test_size=test_ratio/(test_ratio + val_ratio),
                                                         random_state=seed)
     train_x = pd.concat([train_x, train_y], axis=1)
@@ -404,9 +404,9 @@ def generate_train_val_test_set(ehr_data: pl.DataFrame,
         print(f'Saving train/val/test split IDs to {output_path}')
         
     ### Save patient IDs
-    train_x[['subject_id']].to_csv(os.path.join(output_path, 'training_ids.csv'), index=False)
-    val_x[['subject_id']].to_csv(os.path.join(output_path, 'validation_ids.csv'), index=False)
-    test_x[['subject_id']].to_csv(os.path.join(output_path, 'testing_ids.csv'), index=False)
+    train_x[['subject_id']].to_csv(os.path.join(output_path, 'training_ids_'+outcome_col+'.csv'), index=False)
+    val_x[['subject_id']].to_csv(os.path.join(output_path, 'validation_ids_'+outcome_col+'.csv'), index=False)
+    test_x[['subject_id']].to_csv(os.path.join(output_path, 'testing_ids_'+outcome_col+'.csv'), index=False)
 
     return {'train': train_x, 'val': val_x, 'test': test_x}
     
@@ -434,7 +434,6 @@ def process_text_to_embeddings(notes: pl.DataFrame) -> dict:
 
     Args:
         notes (pl.DataFrame): Dataframe containing notes data.
-        use_gpu (bool): Whether to use GPU for inference. Defaults to False.
 
     Returns:
         dict: Dictionary containing subject_id as keys and average word embeddings as values.
@@ -450,7 +449,8 @@ def process_text_to_embeddings(notes: pl.DataFrame) -> dict:
         "emilyalsentzer/Bio_Discharge_Summary_BERT"
     )
     model = AutoModel.from_pretrained("emilyalsentzer/Bio_Discharge_Summary_BERT").to(device)
-
+    # randomly downsample notes
+    notes = notes.sample(fraction=0.05)
     for row in tqdm(
         notes.iter_rows(named=True),
         desc="Generating notes embeddings with ClinicalBERT...",
@@ -596,6 +596,7 @@ def generate_interval_dataset(ehr_static: pl.DataFrame, ts_data: pl.DataFrame,
                               include_dyn_mean: bool = False, 
                               no_resample: bool = False,
                               max_elapsed: int = None,
+                              vitals_lkup: list = [],
                               verbose: bool = True) -> dict:
     """Generates a multimodal dataset with set intervals for each event source."""
     data_dict = {}
@@ -697,8 +698,11 @@ def generate_interval_dataset(ehr_static: pl.DataFrame, ts_data: pl.DataFrame,
 
         if write_data:
             data_dict[id_val] = {"static": ehr_static}
-            for idx, ts in enumerate(ts_data_list):
-                data_dict[id_val][f"dynamic_{idx}"] = ts
+            for _, ts in enumerate(ts_data_list):
+                if ts.columns==vitals_lkup:
+                    data_dict[id_val]["dynamic_0"] = ts
+                else:
+                    data_dict[id_val]["dynamic_1"] = ts
             n += 1
 
     if verbose:
