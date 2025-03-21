@@ -639,7 +639,7 @@ def process_text_to_embeddings(notes: pl.DataFrame) -> dict:
         device
     )
     # randomly downsample notes for testing
-    #notes = notes.sample(fraction=0.05)
+    # notes = notes.sample(fraction=0.05)
     for row in tqdm(
         notes.iter_rows(named=True),
         desc="Generating notes embeddings with ClinicalBERT...",
