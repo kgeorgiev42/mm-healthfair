@@ -341,30 +341,31 @@ def plot_token_length_by_attribute(
     """
     ### Edit when customising outcomes
     unique_value_order = ["N", "Y"]
-    gr_pairs = {
-        "gender": [("M", "F")],
-        "insurance": [
-            ("Medicare", "Medicaid"),
-            ("Medicare", "Private"),
-            ("Medicaid", "Private"),
-        ],
-        "race_group": [
-            ("White", "Black"),
-            ("White", "Hispanic/Latino"),
-            ("White", "Asian"),
-            ("Black", "Hispanic/Latino"),
-            ("Black", "Asian"),
-            ("Hispanic/Latino", "Asian"),
-        ],
-        "marital_status": [
-            ("Divorced", "Single"),
-            ("Divorced", "Married"),
-            ("Divorced", "Widowed"),
-            ("Single", "Married"),
-            ("Single", "Widowed"),
-            ("Married", "Widowed"),
-        ],
-    }
+    if gr_pairs is None:
+        gr_pairs = {
+            "gender": [("M", "F")],
+            "insurance": [
+                ("Medicare", "Medicaid"),
+                ("Medicare", "Private"),
+                ("Medicaid", "Private"),
+            ],
+            "race_group": [
+                ("White", "Black"),
+                ("White", "Hispanic/Latino"),
+                ("White", "Asian"),
+                ("Black", "Hispanic/Latino"),
+                ("Black", "Asian"),
+                ("Hispanic/Latino", "Asian"),
+            ],
+            "marital_status": [
+                ("Divorced", "Single"),
+                ("Divorced", "Married"),
+                ("Divorced", "Widowed"),
+                ("Single", "Married"),
+                ("Single", "Widowed"),
+                ("Married", "Widowed"),
+            ],
+        }
     if isinstance(ed_pts, pl.LazyFrame):
         ed_pts = ed_pts.collect()
 

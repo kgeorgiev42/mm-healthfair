@@ -638,8 +638,8 @@ def process_text_to_embeddings(notes: pl.DataFrame) -> dict:
     model = AutoModel.from_pretrained("emilyalsentzer/Bio_Discharge_Summary_BERT").to(
         device
     )
-    # randomly downsample notes
-    notes = notes.sample(fraction=0.05)
+    # randomly downsample notes for testing
+    #notes = notes.sample(fraction=0.05)
     for row in tqdm(
         notes.iter_rows(named=True),
         desc="Generating notes embeddings with ClinicalBERT...",
