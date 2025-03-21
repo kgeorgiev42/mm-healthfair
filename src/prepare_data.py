@@ -225,6 +225,8 @@ if args.include_notes:
     notes = notes.select(["subject_id", "target"]).cast(
         {"subject_id": pl.Int64, "target": pl.String}
     )
+    ### Select only notes with captured measurements
+    notes = notes.filter(pl.col("subject_id").is_in(feature_dict.keys()))
     # Clean notes by removing "___" identifiers
     if args.verbose:
         print("Cleaning discharge notes from extra identifiers..")
