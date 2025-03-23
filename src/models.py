@@ -108,7 +108,6 @@ class MMModel(L.LightningModule):
             nt_embed_dim = 0
 
         if self.fusion_method == "mag":
-            # print('Using MAG layer.')
             if self.st_first:
                 self.fuse = Gate(
                     st_embed_dim, *([ts_embed_dim] * self.num_ts), dropout=dropout
@@ -123,7 +122,6 @@ class MMModel(L.LightningModule):
 
         elif self.fusion_method == "concat":
             # embeddings must be same dim
-            # print('Using Concat layer.')
             assert st_embed_dim == ts_embed_dim
             if self.with_notes:
                 assert nt_embed_dim == st_embed_dim
@@ -276,19 +274,6 @@ class MMModel(L.LightningModule):
         return [optimizer], [
             {"scheduler": scheduler, "monitor": "val_loss", "interval": "epoch"}
         ]
-
-
-class EmbedStatic(nn.Module):
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
-
-        # Use embedding for categorical static data (no ohe-needed)
-        # Use dense layer for numerical static data
-        # Concatenate outputs
-
-    def forward(self):
-        pass
-
 
 class LitLSTM(L.LightningModule):
     """LSTM using time-series data only.

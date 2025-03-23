@@ -2,7 +2,6 @@ import argparse
 
 import polars as pl
 import torch
-from sklearn.model_selection import train_test_split
 from torch.utils.data import Dataset
 from utils.functions import load_pickle, preview_data
 
@@ -70,82 +69,71 @@ class CollateTimeSeries:
                 )
                 events = [data[2][ts][:min_events] for data in batch]
                 dynamic.append(events)
-            return static, labels, dynamic
+                
+            if notes is not None:
+                return static, labels, dynamic, lengths, notes
+            else:
+                return static, labels, dynamic, lengths
 
 
 class MIMIC4Dataset(Dataset):
     """MIMIC-IV Dataset class. Subclass of Pytorch Dataset.
-    Reads from .pkl data dictionary where key is hospital admission ID and values are the dataframes.
+    Reads from .pkl data dictionary where key is patient ID and values are the dataframes.
     """
 
     def __init__(
         self,
         data_path=None,
+        col_path=None,
         split=None,
         ids=None,
-        los_thresh=2,
         static_only=False,
         with_notes=False,
+        outcome="in_hosp_death"
     ) -> None:
         super().__init__()
 
         self.data_dict = load_pickle(data_path)
-        self.hadm_id_list = list(self.data_dict.keys()) if ids is None else ids
-        self.dynamic_keys = [
-            key
-            for key in self.data_dict[int(self.hadm_id_list[0])].keys()
-            if "dynamic" in key
-        ]
-        self.los_thresh = los_thresh
+        self.col_dict = load_pickle(col_path)
+        self.id_list = list(self.data_dict.keys()) if ids is None else ids
+        self.dynamic_keys = [key for key in self.data_dict[self.id_list[0]].keys() if "dynamic" in key]
         self.split = split
         self.static_only = static_only
         self.with_notes = with_notes
         self.splits = {"train": None, "val": None, "test": None}
-
-        if ids is None:
-            self.setup_data()
-            self.splits = {
-                "train": self.train_ids,
-                "val": self.val_ids,
-                "test": self.test_ids,
-            }
-        else:
-            self.splits[split] = ids
+        self.outcome = outcome
+        self.splits[split] = ids
 
     def __len__(self):
         return (
             len(self.splits[self.split])
             if self.split is not None
-            else len(self.hadm_id_list)
+            else len(self.id_list)
         )
 
     def __getitem__(self, idx):
-        hadm_id = int(self.splits[self.split][idx])
-
-        static = self.data_dict[hadm_id]["static"]  # polars df
-        static = static.with_columns(
-            label=pl.when(pl.col("los") > self.los_thresh).then(1.0).otherwise(0.0)
-        )
-
+        pt_id = int(self.splits[self.split][idx])
+        static = self.data_dict[pt_id]["static"]
         label = torch.tensor(
-            static.select("label").item(), dtype=torch.float32
+            self.data_dict[pt_id][self.outcome][0][0], dtype=torch.float32
         ).unsqueeze(-1)
-
-        static = static.drop(["label", "los"])
-        static = torch.tensor(static.to_numpy(), dtype=torch.float32)
+        static = torch.tensor(static, dtype=torch.float32)
 
         if self.static_only:
             return static, label
 
         else:
             dynamic = [
-                self.data_dict[hadm_id][i] for i in self.dynamic_keys
-            ]  # list of polars df's
-            dynamic = [torch.tensor(x.to_numpy(), dtype=torch.float32) for x in dynamic]
-
+                self.data_dict[pt_id][i] for i in self.dynamic_keys
+            ]
+            dynamic = [torch.tensor(x, dtype=torch.float32) for x in dynamic]
             if self.with_notes:
-                notes = self.data_dict[hadm_id]["notes"]  # 1 x 768
-                notes = torch.tensor(notes, dtype=torch.float32)
+                notes = self.data_dict[pt_id]["notes"]  # 1 x 768
+                ### Extract tokens only
+                emblist = []
+                for emb in notes:
+                    emblist.append(emb[1])
+                notes = torch.tensor(emblist, dtype=torch.float32)
                 return static, label, dynamic, notes
             else:
                 return static, label, dynamic
@@ -153,41 +141,28 @@ class MIMIC4Dataset(Dataset):
     def print_label_dist(self):
         # if no particular split then use entire data dict
         if self.split is None:
-            id_list = self.hadm_id_list
+            id_list = self.id_list
         else:
             id_list = self.splits[self.split]
 
-        all_static = pl.concat(
-            [self.data_dict[int(i)]["static"].select(pl.col("los")) for i in id_list]
-        )
-        n_positive = all_static.select(pl.col("los") > self.los_thresh).sum().item()
+        n_positive = [id_list[i] for i in range(len(id_list)) if self.data_dict[id_list[i]][self.outcome][0][0] == 1]
 
         if self.split is not None:
             print(f"{self.split.upper()}:")
 
-        print(f"Positive cases (los > {self.los_thresh}): {n_positive}")
+        print(f"Positive cases: {n_positive}")
         print(
-            f"Negative cases (los <= {self.los_thresh}): {all_static.height - n_positive}"
+            f"Negative cases: {self.id_list.shape[0] - n_positive}"
         )
 
     def get_feature_dim(self, key="static"):
-        return self.data_dict[int(self.hadm_id_list[0])][key].shape[1]
+        return self.data_dict[int(self.id_list[0])][key].shape[1]
 
     def get_feature_list(self, key="static"):
-        data = self.data_dict[int(self.hadm_id_list[0])][key]
-        if key == "static":
-            data = data.drop("los")
-        return data.columns
+        return self.col_dict[key + "_cols"]
 
     def get_split_ids(self, split):
         return self.splits[split]
-
-    def setup_data(self, test_ratio=0.15, val_ratio=0.2):
-        train_ids, test_ids = train_test_split(self.hadm_id_list, test_size=test_ratio)
-        train_ids, val_ids = train_test_split(train_ids, test_size=val_ratio)
-        self.train_ids = train_ids
-        self.val_ids = val_ids
-        self.test_ids = test_ids
 
 
 if __name__ == "__main__":

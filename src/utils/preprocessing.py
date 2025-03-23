@@ -823,7 +823,7 @@ def generate_interval_dataset(
     ehr_lkup = ehr_lkup.drop(outcomes)
     col_dict["static_cols"] = ehr_lkup.columns
     col_dict["dynamic0_cols"] = vitals_lkup
-    col_dict["note_cols"] = ["sentence", "embedding"]
+    col_dict["notes_cols"] = ["sentence", "embedding"]
 
     feature_map, freq = _prepare_feature_map_and_freq(ts_data, vitals_freq, lab_freq)
     min_events = 1 if min_events is None else int(min_events)

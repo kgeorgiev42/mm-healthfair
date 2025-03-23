@@ -1,4 +1,8 @@
 import argparse
+import sys
+import glob
+import os
+import polars as pl
 
 import lightning as L
 import toml
@@ -11,36 +15,51 @@ from lightning.pytorch.callbacks import (
 from lightning.pytorch.loggers import CSVLogger, WandbLogger
 from models import MMModel
 from torch.utils.data import DataLoader
-from utils.functions import read_from_txt
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description="Multimodal learning pipeline.")
     parser.add_argument(
         "data_path",
         type=str,
-        help="Path to the pickled data.",
+        help="Path to the pickled data dictionary generated from prepare_data.py.",
+        default="../outputs/prep_data/mmfair_feat.pkl",
+    )
+    parser.add_argument(
+        "col_path",
+        type=str,
+        help="Path to the pickled column dictionary generated from prepare_data.py.",
+        default="../outputs/prep_data/mmfair_cols.pkl",
+    )
+    parser.add_argument(
+        "ids_path",
+        type=str,
+        help="Directory containing train/val/test ids.",
+        default="../outputs/prep_data",
+    )
+    parser.add_argument(
+        "--outcome",
+        "-o",
+        type=str,
+        help="Binary outcome to use for multimodal learning (one of the labels in targets.toml)."
+        "Defaults to prediction of in-hospital death.",
+        default="in_hosp_death",
     )
     parser.add_argument(
         "--config",
         "-c",
         type=str,
-        default="config.toml",
-        help="Path to config toml file containing parameters.",
+        default="../config/model.toml",
+        help="Path to config toml file containing model training parameters.",
+    )
+    parser.add_argument(
+        "--targets",
+        "-t",
+        type=str,
+        default="../config/targets.toml",
+        help="Path to config toml file containing lookup fields and outcomes.",
     )
     parser.add_argument(
         "--cpu", action="store_true", help="Whether to use cpu. Defaults to gpu"
-    )
-    parser.add_argument(
-        "--train",
-        nargs="?",
-        default=None,
-        help="Path to text file containing hadm_ids to use for training.",
-    )
-    parser.add_argument(
-        "--val",
-        nargs="?",
-        default=None,
-        help="Path to text file containing hadm_ids to use for validation.",
     )
     parser.add_argument(
         "--project",
@@ -48,7 +67,6 @@ if __name__ == "__main__":
         default="nhs-mm-healthfair",
         help="Name of project, used for wandb logging.",
     )
-
     parser.add_argument(
         "--wandb",
         action="store_true",
@@ -57,44 +75,63 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     config = toml.load(args.config)
+    targets = toml.load(args.targets)
     device = "gpu" if not args.cpu else "cpu"
     use_wandb = args.wandb
 
+    ### Model config
     batch_size = config["data"]["batch_size"]
     n_epochs = config["train"]["epochs"]
     lr = config["train"]["learning_rate"]
     num_workers = config["data"]["num_workers"]
     los_threshold = config["model"]["threshold"]
     fusion_method = config["model"]["fusion_method"]
-    with_ts = config["model"]["with_ts"]
-
     # overrides to True if not using mag fusion method
+    ### Modality-specific config
     st_first = config["model"]["st_first"] if fusion_method == "mag" else True
-
     modalities = config["data"]["modalities"]
+    with_ts = config["model"]["with_ts"]
     static_only = True if (len(modalities) == 1) and ("static" in modalities) else False
     with_notes = True if "notes" in modalities else False
-
+    ### General setup
+    outcomes = targets["outcomes"]["labels"]
+    outcomes_disp = targets["outcomes"]["display"]
+    if args.outcome not in outcomes:
+        print(f"Outcome {args.outcome} must be included in targets.toml.")
+        sys.exit()
+    outcome_idx = outcomes.index(args.outcome)
+    print('------------------------------------------')
+    print("MMHealthFair: Multimodal learning pipeline")
+    print(f'Creating multimodal learning pipeline for outcome "{outcomes_disp[outcome_idx]}"')
+    print(f'Modalities used: {modalities}')
+    print(f'Fusion method: {fusion_method}')
+    print('------------------------------------------')
     L.seed_everything(0)
 
     # Get training and validation ids
-    train_ids = read_from_txt(args.train) if args.train is not None else None
-    val_ids = read_from_txt(args.val) if args.val is not None else None
+    if len(glob.glob(os.path.join(args.ids_path, "training_ids_" + {args.outcome} + ".csv"))) == 0:
+        print(f"No training ids found for outcome {args.outcome}. Exiting..")
+        sys.exit()
+
+    if len(glob.glob(os.path.join(args.ids_path, "validation_ids_" + {args.outcome} + ".csv"))) == 0:
+        print(f"No validation ids found for outcome {args.outcome}. Exiting..")
+        sys.exit()
+
+    train_ids = pl.read_csv(os.path_join(args.ids_path, "training_ids_" + {args.outcome} + ".csv")).select("subject_id").to_numpy()
+    val_ids = pl.read_csv(os.path_join(args.ids_path, "validation_ids_" + {args.outcome} + ".csv")).select("subject_id").to_numpy()
 
     training_set = MIMIC4Dataset(
         args.data_path,
         "train",
         ids=train_ids,
-        los_thresh=los_threshold,
         static_only=static_only,
         with_notes=with_notes,
     )
-
     training_set.print_label_dist()
 
     n_static_features = (
-        training_set.get_feature_dim() - 1
-    )  # -1 since extracting label from static data and dropping los column
+        training_set.get_feature_dim()
+    )  # add -1 if dropping label col
 
     if not static_only:
         n_dynamic_features = (
@@ -116,7 +153,6 @@ if __name__ == "__main__":
         args.data_path,
         "val",
         ids=val_ids,
-        los_thresh=los_threshold,
         static_only=static_only,
         with_notes=with_notes,
     )
