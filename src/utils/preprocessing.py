@@ -608,10 +608,13 @@ def generate_train_val_test_set(
 
 def clean_notes(notes: pl.DataFrame | pl.LazyFrame) -> pl.DataFrame | pl.LazyFrame:
     """Cleans notes data by removing any relevant special characters and extra whitespaces."""
-    # Remove __
-    notes = notes.with_columns(target=pl.col("target").str.replace_all(r"\s___\s", " "))
-    # Remove any extra whitespaces
-    notes = notes.with_columns(target=pl.col("target").str.replace_all(r"\s+", " "))
+    # Remove __ and any extra whitespaces
+    notes = notes.with_columns(
+        target=pl.col("target")
+        .str.replace_all(r"___", " ")
+        .str.replace_all(r"\s+", " ")
+    )
+    #notes = notes.with_columns(target=pl.col("target").str.replace_all(r"\s+", " "))
     return notes
 
 
@@ -805,15 +808,22 @@ def generate_interval_dataset(
     no_resample: bool = False,
     max_elapsed: int = None,
     vitals_lkup: list = None,
+    outcomes: list = None,
     verbose: bool = True,
 ) -> dict:
     """Generates a multimodal dataset with set intervals for each event source."""
     data_dict = {}
+    col_dict = {}
     n = 0
     filter_by_nb_events = 0
     missing_event_src = 0
     filter_by_elapsed_time = 0
     n_src = ts_data.n_unique("linksto")
+    ehr_lkup = ehr_static.drop("subject_id")
+    ehr_lkup = ehr_lkup.drop(outcomes)
+    col_dict["static_cols"] = ehr_lkup.columns
+    col_dict["dynamic0_cols"] = vitals_lkup
+    col_dict["note_cols"] = ["sentence", "embedding"]
 
     feature_map, freq = _prepare_feature_map_and_freq(ts_data, vitals_freq, lab_freq)
     min_events = 1 if min_events is None else int(min_events)
@@ -833,6 +843,7 @@ def generate_interval_dataset(
             .head(1)
             .item()
         )
+        ehr_sel = ehr_static.filter(pl.col("subject_id") == id_val)
 
         if pt_events.n_unique("linksto") < n_src:
             missing_event_src += 1
@@ -861,10 +872,17 @@ def generate_interval_dataset(
             continue
 
         if write_data:
-            data_dict[id_val] = {"static": ehr_static}
+            ## Encode count features for training
+            ehr_cur = ehr_sel.drop(outcomes)
+            ehr_cur = ehr_cur.drop("subject_id").to_numpy()
+            data_dict[id_val] = {"static": ehr_cur}
+            for outcome in outcomes:
+                data_dict[id_val][outcome] = ehr_sel.select(outcome).cast(pl.Int8).to_numpy()
             for _, ts in enumerate(ts_data_list):
                 key = "dynamic_0" if ts.columns == vitals_lkup else "dynamic_1"
-                data_dict[id_val][key] = ts
+                if key == "dynamic_1" and "dynamic1_cols" not in col_dict.keys():
+                    col_dict['dynamic1_cols'] = ts.columns
+                data_dict[id_val][key] = ts.to_numpy()
             n += 1
 
     if verbose:
@@ -872,7 +890,7 @@ def generate_interval_dataset(
             n, filter_by_nb_events, missing_event_src, filter_by_elapsed_time
         )
 
-    return data_dict
+    return data_dict, col_dict
 
 
 def _prepare_feature_map_and_freq(
@@ -915,7 +933,7 @@ def _process_patient_events(
 
         if not _validate_event_count(timeseries, min_events, max_events):
             skipped_due_to_event_count = True
-            return False, [], skipped_due_to_event_count
+            return False, [], skipped_due_to_event_count, False
 
         timeseries = _handle_missing_features(timeseries, feature_map[src])
         timeseries, ehr_static = _impute_missing_values(timeseries, ehr_static, impute)
@@ -930,11 +948,11 @@ def _process_patient_events(
             timeseries = add_time_elapsed_to_events(timeseries, edregtime)
             if timeseries.filter(pl.col("elapsed") <= max_elapsed).shape[0] == 0:
                 skipped_due_to_elapsed_time = True
-                return False, [], skipped_due_to_elapsed_time
+                return False, [], False, skipped_due_to_elapsed_time
 
         ts_data_list.append(timeseries.select(feature_map[src]))
 
-    return write_data, ts_data_list
+    return write_data, ts_data_list, skipped_due_to_event_count, skipped_due_to_elapsed_time
 
 
 def _validate_event_count(

@@ -53,6 +53,12 @@ parser.add_argument(
     help="Name of pickle file to save processed data.",
 )
 parser.add_argument(
+    "--col_fname",
+    type=str,
+    default="mmfair_cols.pkl",
+    help="Name of pickle file to save column lookup dictionary.",
+)
+parser.add_argument(
     "--config",
     "-c",
     type=str,
@@ -201,7 +207,7 @@ print("---------------------------------")
 events = events.collect(streaming=True)
 # get all features expected for each event data source and set sampling freq
 print(f"Imputing missing values using strategy: {args.impute}")
-feature_dict = generate_interval_dataset(
+feature_dict, col_dict = generate_interval_dataset(
     ehr_proc,
     events,
     ehr_regtime,
@@ -214,6 +220,7 @@ feature_dict = generate_interval_dataset(
     args.no_resample,
     args.max_elapsed,
     vitals,
+    outcomes,
     args.verbose,
 )
 print("---------------------------------")
@@ -273,4 +280,5 @@ print("---------------------------------")
 print(f"Feature preparation successful. Exporting prepared features to {output_dir}..")
 # Save dictionary to disk
 save_pickle(feature_dict, output_dir, args.pkl_fname)
+save_pickle(col_dict, output_dir, args.col_fname)
 print("Finished feature preparation for multimodal learning.")
