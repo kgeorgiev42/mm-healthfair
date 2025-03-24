@@ -1,6 +1,7 @@
 [outcomes]
 labels = ['in_hosp_death', 'ext_stay_7', 'non_home_discharge', 'icu_admission']
 display = ['In-hospital Death', 'Extended Hospital Stay', 'Non-home Discharge', 'ICU Admission']
+colormap = ['#d7191c', '#fdae61', '#abd9e9', '#2c7bb6']
 
 [attributes]
 labels = ['gender', 'race_group', 'marital_status', 'insurance']

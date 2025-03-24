@@ -1,9 +1,12 @@
+import os
+import csv
 import lightning as L
 import torch
 import torch.nn.functional as F
 import torchmetrics
 from torch import nn
 from torch.optim.lr_scheduler import ReduceLROnPlateau
+from lightning.pytorch.callbacks import Callback
 
 
 # nn.Modules
@@ -346,5 +349,38 @@ class LitLSTM(L.LightningModule):
         return loss
 
     def configure_optimizers(self):
-        optimizer = torch.optim.SGD(self.parameters(), lr=self.lr)
+        optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
         return optimizer
+    
+class SaveLossesCallback(Callback):
+    def __init__(self, log_dir="logs", save_every_n_epochs=5):
+        """
+        Callback to save train/validation losses to a CSV file every n epochs.
+
+        Args:
+            log_dir (str): Directory to save the logs.
+            save_every_n_epochs (int): Interval (in epochs) to save the losses.
+        """
+        self.log_dir = log_dir
+        self.save_every_n_epochs = save_every_n_epochs
+        os.makedirs(self.log_dir, exist_ok=True)
+        self.csv_file = os.path.join(self.log_dir, "losses.csv")
+
+        # Initialize the CSV file with headers if it doesn't exist
+        if not os.path.exists(self.csv_file):
+            with open(self.csv_file, mode="w", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow(["Epoch", "Train Loss", "Validation Loss"])
+
+    def on_train_epoch_end(self, trainer):
+        # Save losses every n epochs
+        if (trainer.current_epoch + 1) % self.save_every_n_epochs == 0:
+            train_loss = trainer.callback_metrics.get("train_loss", None)
+            val_loss = trainer.callback_metrics.get("val_loss", None)
+
+            # Append the losses to the CSV file
+            with open(self.csv_file, mode="a", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow([trainer.current_epoch + 1, train_loss, val_loss])
+
+            print(f"Saved losses to {self.csv_file}")

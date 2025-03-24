@@ -32,6 +32,7 @@ tableone = "^0.9.1"
 pyarrow = "^19.0.1"
 pandas = "^2.2.3"
 statannotations = "^0.7.1"
+confidenceinterval = "^1.0.5"
 
 [tool.poetry.group.dev.dependencies]
 deptry = "^0.16.1"

@@ -13,7 +13,8 @@ from lightning.pytorch.callbacks import (
     ModelCheckpoint,
 )
 from lightning.pytorch.loggers import CSVLogger, WandbLogger
-from models import MMModel
+
+from models import MMModel, SaveLossesCallback
 from torch.utils.data import DataLoader
 
 if __name__ == "__main__":
@@ -187,18 +188,22 @@ if __name__ == "__main__":
         logger = CSVLogger("logs")
 
     early_stop = EarlyStopping(monitor="val_loss", mode="min", patience=5)
+
+    mod_str = "_".join(modalities)
     checkpoint = ModelCheckpoint(
         monitor="val_loss",
         mode="min",
+        filename=f"{args.outcome}_{args.fusion_method}_{mod_str}",
     )
     lr_monitor = LearningRateMonitor(logging_interval="epoch")
+    save_losses_callback = SaveLossesCallback(log_dir=f"logs/{args.outcome}_{args.fusion_method}_{mod_str}/", save_every_n_epochs=5)
 
     trainer = L.Trainer(
         max_epochs=n_epochs,
         log_every_n_steps=50,
         logger=logger,
         accelerator=device,
-        callbacks=[early_stop, checkpoint, lr_monitor],
+        callbacks=[early_stop, checkpoint, lr_monitor, save_losses_callback],
     )
 
     trainer.fit(
@@ -206,3 +211,4 @@ if __name__ == "__main__":
         train_dataloaders=training_dataloader,
         val_dataloaders=val_dataloader,
     )
+    print("Completed multimodal training.")

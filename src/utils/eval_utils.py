@@ -1,0 +1,326 @@
+import matplotlib.pyplot as plt
+import pandas as pd
+import numpy as np
+from scipy import stats
+import confidenceinterval as cfi
+
+import glob
+
+from sklearn.calibration import calibration_curve
+from sklearn.metrics import auc, classification_report, f1_score, precision_recall_curve, roc_curve
+
+def plot_learning_curve(losses_path: str = None, 
+                        output_path = "learning_curve.png"):
+    """
+    Plots the learning curve (training and validation loss) of the model.
+
+    Args:
+        logs (dict): Path to csv file containing the training and validation loss.
+        output_path (str): Path to save the learning curve plot.
+    """
+    if not glob.glob(losses_path):
+        print(f"No file found at {losses_path}")
+        return
+    losses = pd.read_csv(losses_path)
+    x_axis = range(1, len(losses) + 1)
+    plt.figure(figsize=(6, 6))
+    plt.plot(x_axis, losses['train_loss'], color='darkorange', label="Training Loss", marker="o")
+    plt.plot(x_axis, losses['val_loss'], color='navy', label="Validation Loss", marker="o")
+    plt.xlabel("Epochs")
+    plt.ylabel("Loss")
+    plt.title("MMFair Learning Curve")
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.savefig(output_path)
+    print(f"Learning curve saved to {output_path}")
+
+def plot_roc(y_test: np.array, prob: np.array,
+             output_path: str = "roc.png", 
+             outcome: str = "In-hospital Death"):
+    fpr, tpr, _ = roc_curve(y_test, prob, pos_label=1)
+    roc_auc = auc(fpr, tpr)
+    plt.figure(figsize=(6, 6))
+    plt.plot(fpr, tpr, color='darkorange', lw=1.5, label='ROC curve (AUC = %0.3f)' % roc_auc)
+    plt.plot([0, 1], [0, 1], color='navy', lw=1.5, linestyle='--')
+    plt.xlabel('False Positive Rate')
+    plt.ylabel('True Positive Rate')
+    plt.title(f'Receiver Operating Characteristic ({outcome})')
+    plt.legend(loc="lower right")
+    plt.savefig(output_path)
+    print(f"ROC curve saved to {output_path}")
+
+def plot_pr(y_test: np.array, prob: np.array,
+                  output_path: str = "pr_curve.png", 
+                  outcome: str = "In-hospital Death"):
+    prevalence = np.sum(y_test) / len(y_test)
+    precision, recall, _ = precision_recall_curve(y_test, prob, pos_label=1)
+    pr_auc = auc(recall, precision)
+    plt.figure(figsize=(6, 6))
+    plt.plot(recall, precision, color='darkorange', lw=1.5, label='PR curve (AUC = %0.3f)' % pr_auc)
+    plt.plot([0, 1], [prevalence, prevalence], color='navy', lw=1.5, linestyle='--')
+    plt.xlabel('Recall')
+    plt.ylabel('Precision')
+    plt.title(f'Precision-Recall Curve ({outcome} with prevalence {(100*prevalence):.2f})')
+    plt.legend(loc="lower right")
+    plt.savefig(output_path)
+    print(f"Precision-Recall curve saved to {output_path}")
+
+def plot_calibration_curve(y_test: np.array, prob: np.array, 
+                           output_path: str = "calib_curve.png", 
+                           outcome: str = "In-hospital Death", 
+                           n_bins: int = 10):
+    """
+    Plots the calibration curve for a deep learning model.
+
+    Args:
+        y_test (np.array): Ground truth binary labels (0 or 1).
+        prob (np.array): Predicted probabilities for the positive class.
+        output_path (str): Path to save the calibration curve plot.
+        outcome (str): Name of the outcome being evaluated.
+        n_bins (int): Number of bins to use for calibration.
+
+    Returns:
+        None
+    """
+    # Compute calibration curve
+    prob_true, prob_pred = calibration_curve(y_test, prob, n_bins=n_bins, strategy='uniform')
+
+    # Plot calibration curve
+    plt.figure(figsize=(6, 6))
+    plt.plot(prob_pred, prob_true, marker='o', label="Calibration Curve")
+    plt.plot([0, 1], [0, 1], color='navy', linestyle='--', label="Perfectly Calibrated")
+    plt.xlabel("Mean Predicted Probability")
+    plt.ylabel("Fraction of Positives")
+    plt.title(f"Calibration Curve ({outcome})")
+    plt.legend(loc="best")
+    plt.grid(True)
+    plt.tight_layout()
+    plt.savefig(output_path)
+    print(f"Calibration curve saved to {output_path}")
+
+def expect_f1(y_prob: np.array, thres: int) -> float:
+    """
+    Calculate expected F1 score for a given threshold.
+
+    Args:
+        y_prob (np.array): Predicted probabilities.
+        thres (float): Threshold for binary classification.
+
+    Returns:
+        float: Expected F1 score.
+    """
+    y_pred = (y_prob >= thres).astype(int)
+    tp = np.sum((y_pred == 1) & (y_prob == 1))
+    fp = np.sum((y_pred == 1) & (y_prob == 0))
+    fn = np.sum((y_pred == 0) & (y_prob == 1))
+    precision = tp / (tp + fp)
+    recall = tp / (tp + fn)
+    f1 = 2 * (precision * recall) / (precision + recall)
+    return f1
+
+def optimal_threshold(y_prob: np.array) -> float:
+    """
+    Calculate the optimal threshold for binary classification.
+
+    Args:
+        y_prob (np.array): Predicted probabilities.
+
+    Returns:
+        float: Optimal threshold.
+    """
+    thresholds = np.linspace(0, 1, 100)
+    f1_scores = [expect_f1(y_prob, thres) for thres in thresholds]
+    optimal_thres = thresholds[np.argmax(f1_scores)]
+    return optimal_thres
+
+def get_roc_performance(y_test: np.array, prob: np.array,
+                        verbose: bool = False):
+    fpr, tpr, th = roc_curve(y_test, prob, pos_label=1)
+    res_dict_roc = {}
+    ### Get Youden's J statistic
+    J = np.argmax(tpr - fpr)
+    yd = th[J]
+    if verbose:
+        print(f"Youden's J statistic: {yd:.3f}")
+    bin_labels = np.asarray(prob >= yd, dtype=int)
+    if verbose:
+        print('Classification report for J threshold:')
+        print(classification_report(y_test, bin_labels, target_names=['0', '1']))
+    aucss, ci = cfi.roc_auc_score(y_test, prob, confidence_level=0.95)
+    ppv, cip = cfi.ppv_score(y_test, bin_labels, confidence_level=0.95)
+    npv, cin = cfi.npv_score(y_test, bin_labels, confidence_level=0.95)
+    tnr, cit = cfi.tnr_score(y_test, bin_labels, confidence_level=0.95)
+    tpr, cis = cfi.tpr_score(y_test, bin_labels, confidence_level=0.95)
+    if verbose:
+        print("ROC-AUC with 95% CI: {:.3f} [{:.3f}, {:.3f}]".format(aucss, ci[0], ci[1]))
+        print("PPV: {:.3f} [{:.3f}, {:.3f}]".format(ppv, cip[0], cip[1]))
+        print("NPV: {:.3f} [{:.3f}, {:.3f}]".format(npv, cin[0], cin[1]))
+        print("Specificity: {:.3f} [{:.3f}, {:.3f}]".format(tnr, cit[0], cit[1]))
+        print("Sensitivity: {:.3f} [{:.3f}, {:.3f}]".format(tpr, cis[0], cis[1]))
+    res_dict_roc['roc_auc'] = aucss
+    res_dict_roc['roc_upper'] = ci[1]
+    res_dict_roc['roc_lower'] = ci[0]
+    res_dict_roc['fpr'] = fpr
+    res_dict_roc['tpr'] = tpr
+    return bin_labels, res_dict_roc
+
+def get_pr_performance(y_test: np.array, prob: np.array,
+                       bin_labels: np.array, opt_f1: bool = True,
+                       verbose: bool = False):
+    
+    precision, recall, th = precision_recall_curve(y_test, prob, pos_label=1)
+    res_dict_pr = {}
+    ### Get F1 score
+    f1 = f1_score(y_test, bin_labels)
+    auc = auc(recall, precision)
+    if opt_f1:
+        thres, _ = optimal_threshold(prob)
+    if verbose:
+        print(f"Optimal F1 score: {f1:.3f}")
+        print(f"Threshold for optimal F1: {thres:.3f}")
+        bin_labels = np.asarray(prob >= thres, dtype=int)
+        f1 = f1_score(y_test, bin_labels)
+        if verbose:
+            print('Classification report for optimal F1 threshold:')
+            print(classification_report(y_test, bin_labels, target_names=['0', '1']))
+        ppv, cip = cfi.ppv_score(y_test, bin_labels, confidence_level=0.95)
+        npv, cin = cfi.npv_score(y_test, bin_labels, confidence_level=0.95)
+        tnr, cit = cfi.tnr_score(y_test, bin_labels, confidence_level=0.95)
+        tpr, cis = cfi.tpr_score(y_test, bin_labels, confidence_level=0.95)
+        if verbose:
+            print("PPV: {:.3f} [{:.3f}, {:.3f}]".format(ppv, cip[0], cip[1]))
+            print("NPV: {:.3f} [{:.3f}, {:.3f}]".format(npv, cin[0], cin[1]))
+            print("Specificity: {:.3f} [{:.3f}, {:.3f}]".format(tnr, cit[0], cit[1]))
+            print("Sensitivity: {:.3f} [{:.3f}, {:.3f}]".format(tpr, cis[0], cis[1]))
+
+    ### Get 95% CI for PR AUC by computing covariance matrix from Z-score
+    fp = np.sum((bin_labels == 1) & (y_test == 0))
+    tp = np.sum((bin_labels == 1) & (y_test == 1))
+    fn = np.sum((bin_labels == 0) & (y_test == 1))
+    prec_s = tp / (tp + fp) if (tp + fp) > 0 else 0
+    recall_s = tp / (tp + fn) if (tp + fn) > 0 else 0
+    se_prec = np.sqrt(prec_s * (1 - prec_s) / (tp + fp))
+    se_rec = np.sqrt(recall_s * (1 - recall_s) / (tp + fn))
+    z = stats.norm.ppf(1 - 0.05 / 2)
+    cip = (prec_s - z * se_prec, prec_s + z * se_prec)
+    cin = (recall_s - z * se_rec, recall_s + z * se_rec)
+    pr_var = (cip[1] - cip[0]) ** 2 / 4
+    rec_var = (cin[1] - cin[0]) ** 2 / 4
+    cov_mat = [[pr_var, 0], [0, rec_var]]
+    auc_se = np.sqrt(np.dot(np.dot([1,1], cov_mat), [1,1]))
+    lb = auc - 1.96 * auc_se
+    ub = auc + 1.96 * auc_se
+    if verbose:
+        print("PR-AUC with 95% CI: {:.3f} [{:.3f}, {:.3f}]".format(auc, lb, ub))
+        print("Precision: {:.3f} [{:.3f}, {:.3f}]".format(prec_s, cip[0], cip[1]))
+        print("Recall: {:.3f} [{:.3f}, {:.3f}]".format(recall_s, cin[0], cin[1]))
+    res_dict_pr['pr_auc'] = auc
+    res_dict_pr['pr_upper'] = ub
+    res_dict_pr['pr_lower'] = lb
+    res_dict_pr['prec'] = prec_s
+    res_dict_pr['recall'] = recall_s
+    res_dict_pr['prevalence'] = np.sum(y_test) / len(y_test)
+    return precision, recall, auc, res_dict_pr 
+
+def get_all_roc_pr_summary(res_dicts: list,
+                           outcomes: list,
+                           colors: list = [],
+                           output_roc_path: str = "roc_summary.png",
+                           output_pr_path: str = "pr_summary.png"):
+    plt.figure(figsize=(6, 6))
+    for res_dict, outcome, color in zip(res_dicts, outcomes, colors):
+        plt.plot(res_dict['fpr'], res_dict['tpr'], 
+                 color=color, lw=1.5, 
+                 label=f'{outcome} (AUC = {res_dict["roc_auc"]:.3f} [{res_dict["roc_lower"]:.3f}, {res_dict["roc_upper"]:.3f}])')
+    plt.plot([0, 1], [0, 1], color='navy', lw=1.5, linestyle='--', label='Random')
+    plt.xlabel('False Positive Rate')
+    plt.ylabel('True Positive Rate')
+    plt.title('Receiver Operating Characteristic (all outcomes)')
+    plt.legend(loc="lower right")
+    plt.tight_layout()
+    plt.savefig(output_roc_path)
+    print(f"ROC summary saved to {output_roc_path}")
+
+    plt.figure(figsize=(6, 6))
+    for res_dict, outcome, color in zip(res_dicts, outcomes, colors):
+        plt.plot(res_dict['recall'], res_dict['prec'], 
+                 color=color, lw=1.5, 
+                 label=f'{outcome} (AUC = {res_dict["pr_auc"]:.3f} [{res_dict["pr_lower"][0]:.3f}, {res_dict["pr_upper"][1]:.3f}])')
+        plt.plot([0,1], [res_dict['prevalence'], res_dict['prevalence']], color=color, lw=1.5, linestyle='--')
+
+    plt.xlabel('Recall')
+    plt.ylabel('Precision')
+    plt.title('Precision-Recall Curve (all outcomes)')
+    plt.legend(loc="lower right")
+    plt.tight_layout()
+    plt.savefig(output_pr_path)
+    print(f"PR summary saved to {output_pr_path}")
+
+def rank_prediction_deciles(y_test: np.array, prob: np.array,
+                            n_bins: int = 10, outcome: str = "In-hospital Death",
+                            output_path: str = "risk_strat.png",
+                            by_attribute: bool = False,
+                            attrs: list = [], attr_disp: list = [],
+                            test_ids: list = [],
+                            attr_features: pd.DataFrame = None,
+                            verbose: bool = False):
+    if verbose:
+        print(f"Ranking prediction deciles for {outcome}..")
+    res_dict = {}
+    lkup_df = pd.DataFrame()
+    lkup_df['prob'] = prob
+    lkup_df['label'] = y_test
+    lkup_df['decile'] = pd.qcut(prob, n_bins, labels=False) + 1
+    avg_resp = lkup_df['label'].mean() * 100
+    dec_stats = lkup_df.groupby('decile')['label'].sum().reset_index()
+    samples = lkup_df.groupby('decile')['label'].count().reset_index().iloc[:, 1:2]
+    samples.columns = ['total']
+    dec_stats['rr'] = round((dec_stats['label'] / samples['total']) * 100, 2)
+    ### Plot risk stratification
+    plt.figure(figsize=(6, 6))
+    plt.bar(range(1, n_bins+1), dec_stats['rr'], width=0.8, 
+            align='center', 
+            alpha=0.7,
+            color='navy')
+    plt.axhline(y=avg_resp, color='crimson', linestyle='-', label=f'ARR: {avg_resp:.2f}%')
+    plt.xlabel('Prediction decile')
+    plt.ylabel('Average response rate (% positive cases)')
+    plt.title(f'Risk Stratification: {outcome}')
+    plt.xticks(range(1, n_bins+1))
+    plt.gca().yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f'{x:.0f}%'))
+    plt.legend(loc="upper left")
+    plt.savefig(output_path)
+    print(f"Risk stratification plot saved to {output_path}")
+    res_dict['outcome_prev'] = avg_resp
+    res_dict['10th_decile_rr'] = dec_stats['rr'].iloc[-1]
+    #### If stratifying by attribute plot the risk decile distribution for each attribute
+    if by_attribute:
+        lkup_df['subject_id'] = test_ids
+        attr_features = attr_features[attr_features['subject_id'].isin(test_ids)]
+        lkup_df = lkup_df.merge(attr_features, on='subject_id', how='left')
+        for attr, disp in zip(attrs, attr_disp):
+            if verbose:
+                print(f"Plotting stratified decile plot for: {disp}")
+            eval_long = pd.melt(lkup_df, id_vars=['decile'], value_vars=[attr], value_name=f'{attr}_Value')
+            eval_long = eval_long.groupby(['decile', f'{attr}_Value'])['decile'].size().reset_index(name='Count')
+            eval_y = eval_long.groupby('decile')['Count'].apply(lambda x: x.sum()).reset_index().rename(columns={'Count': 'Total'})
+            eval_long = eval_long.merge(eval_y, on='decile', how='left')
+            eval_long['Percentage'] = round(eval_long['Count'] / eval_long['Total'], 2)
+            ax = pd.pivot_table(eval_long[['decile', f'{attr}_Value', 'Percentage']], index='decile', 
+                                columns=f'{attr}_Value').plot(kind='bar', stacked=True, figsize=(6, 6),
+                                                              title=f'Risk Stratification: {outcome} by {disp}',
+                                                              color=plt.cm.tab20.colors)
+            ax.legend(title=f'{disp} Value', labels=eval_long[f'{attr}_Value'].unique(),
+                      bbox_to_anchor=(1, 1), loc='upper left')
+            ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f'{x:.0f}%'))
+            plt.xticks(rotation=0, ha='center')
+            plt.xlabel('Prediction decile')
+            plt.ylabel(f'Distribution across {disp} values.')
+            plt.savefig(f"{output_path}_by_{attr}.png")
+            print(f"Risk stratification plot saved to {output_path}_by_{attr}.png")
+
+    return res_dict
+
+
+
