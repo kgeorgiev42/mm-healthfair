@@ -1,0 +1,18 @@
+[model]
+task = 'los'
+threshold = 7
+fusion_method = 'concat'
+st_first = true
+with_ts = true
+
+[data]
+batch_size = 16
+num_workers = 15
+modalities = ['static', 'dynamic', 'notes']
+
+[train]
+epochs = 500
+learning_rate = 1e-2
+
+[paths]
+model_paths = []

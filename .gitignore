@@ -926,3 +926,4 @@ lightning_logs
 !example.toml
 !pyproject.toml
 !targets.toml
+!model.toml

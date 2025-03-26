@@ -15,7 +15,7 @@ from lightning.pytorch import Trainer
 from models import MMModel
 from torch import concat
 from torch.utils.data import DataLoader
-from utils.eval_utils import get_all_roc_pr_summary, get_pr_performance, get_roc_performance, plot_learning_curve, plot_pr, plot_roc, rank_prediction_deciles
+from utils.eval_utils import get_all_roc_pr_summary, get_pr_performance, get_roc_performance, plot_calibration_curve, plot_learning_curve, plot_pr, plot_roc, rank_prediction_deciles
 from utils.functions import load_pickle, save_pickle
 
 if __name__ == "__main__":
@@ -81,7 +81,7 @@ if __name__ == "__main__":
         "--n_bins",
         type=int,
         default=10,
-        help="Number of bins for decile analysis.",
+        help="Number of bins for decile analysis and calibration curve.",
     )
     parser.add_argument(
         "--strat_by_attr",
@@ -123,6 +123,10 @@ if __name__ == "__main__":
         print(f"Outcome {args.outcome} must be included in targets.toml.")
         sys.exit()
     outcome_idx = outcomes.index(args.outcome)
+    ### Set plotting style
+    plt.rcParams.update(
+        {"font.size": 12, "font.weight": "normal", "font.family": "serif"}
+    )
     print('------------------------------------------')
     print("MMHealthFair: Multimodal evaluation pipeline")
     ### If --all_outcomes, load results dictionary and generate summary
@@ -199,6 +203,10 @@ if __name__ == "__main__":
     print('------------------------------------------')
     bin_labels, res_pr_dict = get_pr_performance(y_test, prob, bin_labels, 
                                               opt_f1=True, verbose=args.verbose)
+    print('------------------------------------------')
+    print('Plotting calibration curve...')
+    plot_calibration_curve(y_test, prob, outcome=args.outcome, n_bins=args.n_bins,
+                           output_path=f"{args.eval_path}/calib_{args.outcome}_{args.fusion_method}_{mod_str}.png")
     print('------------------------------------------')
     print('Prediction decile analysis:')
     print('------------------------------------------')

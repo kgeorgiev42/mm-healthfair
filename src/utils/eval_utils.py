@@ -92,7 +92,7 @@ def plot_calibration_curve(y_test: np.array, prob: np.array,
     plt.plot([0, 1], [0, 1], color='navy', linestyle='--', label="Perfectly Calibrated")
     plt.xlabel("Mean Predicted Probability")
     plt.ylabel("Fraction of Positives")
-    plt.title(f"Calibration Curve ({outcome})")
+    plt.title(f"Calibration Curve: ({outcome})")
     plt.legend(loc="best")
     plt.grid(True)
     plt.tight_layout()
