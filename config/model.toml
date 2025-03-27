@@ -1,15 +1,14 @@
 [model]
 fusion_method = 'concat'
 st_first = true
-with_ts = true
 
 [data]
 batch_size = 16
-num_workers = 15
-modalities = ['static', 'dynamic', 'notes']
+num_workers = 0
+modalities = ['timeseries', 'notes', 'static']
 
 [train]
-epochs = 50
+epochs = 100
 learning_rate = 1e-2
 
 [paths]

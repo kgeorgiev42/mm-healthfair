@@ -99,7 +99,7 @@ if __name__ == "__main__":
     ### Modality-specific config
     st_first = config["model"]["st_first"] if fusion_method == "mag" else True
     modalities = config["data"]["modalities"]
-    with_ts = config["model"]["with_ts"]
+    with_ts = True if "dynamic" in modalities else False
     static_only = True if (len(modalities) == 1) and ("static" in modalities) else False
     with_notes = True if "notes" in modalities else False
     ### General setup
@@ -108,6 +108,10 @@ if __name__ == "__main__":
     if args.outcome not in outcomes:
         print(f"Outcome {args.outcome} must be included in targets.toml.")
         sys.exit()
+    if fusion_method!="None" and len(modalities) < 2:
+        print("Fusion method is not None, but only one modality is provided. Exiting..")
+        sys.exit()
+        
     outcome_idx = outcomes.index(args.outcome)
     print('------------------------------------------')
     print("MMHealthFair: Multimodal learning pipeline")
@@ -192,8 +196,7 @@ if __name__ == "__main__":
         ts_input_dim=n_dynamic_features,
         with_packed_sequences=True if not static_only else False,
         fusion_method=fusion_method,
-        with_notes=with_notes,
-        with_ts=with_ts,
+        modalities=modalities,
         st_first=st_first,
     )
 
@@ -209,7 +212,7 @@ if __name__ == "__main__":
     else:
         logger = CSVLogger("logs")
 
-    early_stop = EarlyStopping(monitor="val_loss", mode="min", patience=5)
+    early_stop = EarlyStopping(monitor="val_loss", mode="min", patience=20)
 
     mod_str = "_".join(modalities)
     checkpoint = ModelCheckpoint(
