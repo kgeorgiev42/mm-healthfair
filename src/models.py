@@ -155,7 +155,7 @@ class MMModel(L.LightningModule):
                 lengths = batch[3]
 
         if self.fusion_method != "None":
-            # print('Packing padded sequences.')
+            #print('Packing padded sequences.')
             ts_embed = []
             for i in range(self.num_ts):
                 if self.with_packed_sequences:
@@ -272,8 +272,8 @@ class MMModel(L.LightningModule):
         return y_hat, y
 
     def configure_optimizers(self):
-        optimizer = torch.optim.SGD(self.parameters(), lr=self.lr)
-        scheduler = ReduceLROnPlateau(optimizer, mode="min", patience=20)
+        optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr, weight_decay=1e-4)
+        scheduler = ReduceLROnPlateau(optimizer, mode="min", patience=10)
         return [optimizer], [
             {"scheduler": scheduler, "monitor": "val_loss", "interval": "epoch"}
         ]
@@ -371,8 +371,18 @@ class SaveLossesCallback(Callback):
             with open(self.csv_file, mode="w", newline="") as f:
                 writer = csv.writer(f)
                 writer.writerow(["Epoch", "Train Loss", "Validation Loss"])
+        else:
+            ## Clear the file if it already exists
+            open(self.csv_file, "w").close()
 
-    def on_train_epoch_end(self, trainer):
+    def on_train_epoch_end(self, trainer, pl_module):
+        """
+        Called at the end of each training epoch.
+
+        Args:
+            trainer: The PyTorch Lightning trainer instance.
+            pl_module: The LightningModule being trained.
+        """
         # Save losses every n epochs
         if (trainer.current_epoch + 1) % self.save_every_n_epochs == 0:
             train_loss = trainer.callback_metrics.get("train_loss", None)
@@ -381,6 +391,10 @@ class SaveLossesCallback(Callback):
             # Append the losses to the CSV file
             with open(self.csv_file, mode="a", newline="") as f:
                 writer = csv.writer(f)
-                writer.writerow([trainer.current_epoch + 1, train_loss, val_loss])
+                writer.writerow([
+                    trainer.current_epoch + 1, 
+                    train_loss.item() if train_loss is not None else None, 
+                    val_loss.item() if val_loss is not None else None
+                ])
 
             print(f"Saved losses to {self.csv_file}")

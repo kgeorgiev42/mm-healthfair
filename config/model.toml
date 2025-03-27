@@ -1,6 +1,4 @@
 [model]
-task = 'los'
-threshold = 7
 fusion_method = 'concat'
 st_first = true
 with_ts = true
@@ -11,7 +9,7 @@ num_workers = 15
 modalities = ['static', 'dynamic', 'notes']
 
 [train]
-epochs = 500
+epochs = 50
 learning_rate = 1e-2
 
 [paths]

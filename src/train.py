@@ -3,6 +3,7 @@ import sys
 import glob
 import os
 import polars as pl
+import numpy as np
 
 import lightning as L
 import toml
@@ -23,19 +24,21 @@ if __name__ == "__main__":
         "data_path",
         type=str,
         help="Path to the pickled data dictionary generated from prepare_data.py.",
-        default="../outputs/prep_data/mmfair_feat.pkl",
+        default="../outputs/processed_data/mmfair_feat.pkl",
     )
     parser.add_argument(
-        "col_path",
+        "--col_path",
+        "-p",
         type=str,
         help="Path to the pickled column dictionary generated from prepare_data.py.",
-        default="../outputs/prep_data/mmfair_cols.pkl",
+        default="../outputs/processed_data/mmfair_cols.pkl",
     )
     parser.add_argument(
-        "ids_path",
+        "--ids_path",
+        "-i",
         type=str,
         help="Directory containing train/val/test ids.",
-        default="../outputs/prep_data",
+        default="../outputs/processed_data",
     )
     parser.add_argument(
         "--outcome",
@@ -63,6 +66,12 @@ if __name__ == "__main__":
         "--cpu", action="store_true", help="Whether to use cpu. Defaults to gpu"
     )
     parser.add_argument(
+        "--sample",
+        type=int,
+        default=None,
+        help="Randomly sample subjects for testing. Training set will equal sample, validation set will be 1/5th of sample.",
+    )
+    parser.add_argument(
         "--project",
         type=str,
         default="nhs-mm-healthfair",
@@ -85,7 +94,6 @@ if __name__ == "__main__":
     n_epochs = config["train"]["epochs"]
     lr = config["train"]["learning_rate"]
     num_workers = config["data"]["num_workers"]
-    los_threshold = config["model"]["threshold"]
     fusion_method = config["model"]["fusion_method"]
     # overrides to True if not using mag fusion method
     ### Modality-specific config
@@ -110,25 +118,35 @@ if __name__ == "__main__":
     L.seed_everything(0)
 
     # Get training and validation ids
-    if len(glob.glob(os.path.join(args.ids_path, "training_ids_" + {args.outcome} + ".csv"))) == 0:
+    if len(glob.glob(os.path.join(args.ids_path, "training_ids_" + args.outcome + ".csv"))) == 0:
         print(f"No training ids found for outcome {args.outcome}. Exiting..")
         sys.exit()
 
-    if len(glob.glob(os.path.join(args.ids_path, "validation_ids_" + {args.outcome} + ".csv"))) == 0:
+    if len(glob.glob(os.path.join(args.ids_path, "validation_ids_" + args.outcome + ".csv"))) == 0:
         print(f"No validation ids found for outcome {args.outcome}. Exiting..")
         sys.exit()
 
-    train_ids = pl.read_csv(os.path_join(args.ids_path, "training_ids_" + {args.outcome} + ".csv")).select("subject_id").to_numpy()
-    val_ids = pl.read_csv(os.path_join(args.ids_path, "validation_ids_" + {args.outcome} + ".csv")).select("subject_id").to_numpy()
+    train_ids = pl.read_csv(os.path.join(args.ids_path, "training_ids_" + args.outcome + ".csv")).select("subject_id").to_numpy().flatten()
+    val_ids = pl.read_csv(os.path.join(args.ids_path, "validation_ids_" + args.outcome + ".csv")).select("subject_id").to_numpy().flatten()
+
+    if args.sample is not None:
+        ### Randomly sample train_ids
+        print(f'Using random sample of {args.sample} subjects for training and validation.')
+        train_ids = np.random.choice(train_ids, args.sample, replace=False)
+        val_ids = np.random.choice(val_ids, args.sample // 5, replace=False)
+        args.outcome = args.outcome + "_sample"
 
     training_set = MIMIC4Dataset(
         args.data_path,
+        args.col_path,
         "train",
         ids=train_ids,
         static_only=static_only,
         with_notes=with_notes,
     )
     training_set.print_label_dist()
+    #training_set.__getitem__(0)
+    #sys.exit()
 
     n_static_features = (
         training_set.get_feature_dim()
@@ -139,6 +157,8 @@ if __name__ == "__main__":
             training_set.get_feature_dim("dynamic_0"),
             training_set.get_feature_dim("dynamic_1"),
         )
+        #print(n_dynamic_features)
+        #print(n_static_features)
     else:
         n_dynamic_features = (None, None)
 
@@ -147,11 +167,12 @@ if __name__ == "__main__":
         batch_size=batch_size,
         num_workers=num_workers,
         collate_fn=CollateFn() if static_only else CollateTimeSeries(),
-        persistent_workers=True,
+        persistent_workers=True if num_workers > 0 else False,
     )
 
     validation_set = MIMIC4Dataset(
         args.data_path,
+        args.col_path,
         "val",
         ids=val_ids,
         static_only=static_only,
@@ -162,8 +183,9 @@ if __name__ == "__main__":
         batch_size=batch_size,
         num_workers=num_workers,
         collate_fn=CollateFn() if static_only else CollateTimeSeries(),
-        persistent_workers=True,
+        persistent_workers=True if num_workers > 0 else False,
     )
+    validation_set.print_label_dist()
 
     model = MMModel(
         st_input_dim=n_static_features,
@@ -193,14 +215,15 @@ if __name__ == "__main__":
     checkpoint = ModelCheckpoint(
         monitor="val_loss",
         mode="min",
-        filename=f"{args.outcome}_{args.fusion_method}_{mod_str}",
+        filename=f"{args.outcome}_{fusion_method}_{mod_str}",
     )
     lr_monitor = LearningRateMonitor(logging_interval="epoch")
-    save_losses_callback = SaveLossesCallback(log_dir=f"logs/{args.outcome}_{args.fusion_method}_{mod_str}/", save_every_n_epochs=5)
+    save_losses_callback = SaveLossesCallback(log_dir=f"logs/{args.outcome}_{fusion_method}_{mod_str}/", 
+                                              save_every_n_epochs=5)
 
     trainer = L.Trainer(
         max_epochs=n_epochs,
-        log_every_n_steps=50,
+        log_every_n_steps=20,
         logger=logger,
         accelerator=device,
         callbacks=[early_stop, checkpoint, lr_monitor, save_losses_callback],
