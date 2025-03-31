@@ -65,7 +65,7 @@ class MMModel(L.LightningModule):
         nt_input_dim=768,
         nt_embed_dim=64,
         num_layers=1,
-        dropout=0.1,
+        dropout=0.2,
         num_ts=2,
         target_size=1,
         lr=0.1,
@@ -73,6 +73,7 @@ class MMModel(L.LightningModule):
         st_first=True,
         modalities=["static", "timeseries", "notes"],
         with_packed_sequences=False,
+        dataset=None
     ):
         super().__init__()
         self.save_hyperparameters()
@@ -86,10 +87,13 @@ class MMModel(L.LightningModule):
 
         if self.with_static:
             self.embed_static = nn.Sequential(
-                nn.Linear(st_input_dim, st_embed_dim // 2),
-                nn.LayerNorm(st_embed_dim // 2),
-                nn.Linear(st_embed_dim // 2, st_embed_dim),
+                nn.Linear(st_input_dim, st_embed_dim),
+                nn.ReLU(),
                 nn.Dropout(dropout),
+                nn.Linear(st_embed_dim, st_embed_dim // 2),
+                nn.ReLU(),
+                nn.Dropout(dropout),
+                nn.Linear(st_embed_dim // 2, st_embed_dim),
                 nn.ReLU(),
             )
         else:
@@ -113,7 +117,23 @@ class MMModel(L.LightningModule):
             ts_embed_dim = 0
 
         if self.with_notes:
-            self.embed_notes = nn.Linear(nt_input_dim, nt_embed_dim)
+            self.embed_notes = nn.Sequential(
+                nn.Linear(nt_input_dim, nt_embed_dim),
+                nn.LayerNorm(nt_embed_dim),
+                nn.ReLU(),
+                nn.TransformerEncoder(
+                    nn.TransformerEncoderLayer(
+                        d_model=nt_embed_dim,
+                        nhead=8,
+                        dim_feedforward=256,
+                        dropout=dropout,
+                        activation="relu",
+                        batch_first=True,
+                    ),
+                    num_layers=2,
+                ),
+                nn.Dropout(dropout),
+            )
         else:
             self.embed_notes = None
             nt_embed_dim = 0
@@ -157,8 +177,12 @@ class MMModel(L.LightningModule):
             self.fc = nn.Linear((self.num_ts * ts_embed_dim), target_size)
         elif self.fusion_method == "None" and self.with_notes:
             self.fc = nn.Linear(nt_embed_dim, target_size)
+            
+        # Compute class weights if dataset is provided
+        pos_weight = self.compute_class_weights(dataset) if dataset else None
 
-        self.criterion = torch.nn.BCEWithLogitsLoss()
+        # Loss function with class weights
+        self.criterion = torch.nn.BCEWithLogitsLoss(pos_weight=pos_weight)
         self.lr = lr
         self.acc = torchmetrics.Accuracy(task="binary")
         self.auc = torchmetrics.AUROC(task="binary")
@@ -303,11 +327,36 @@ class MMModel(L.LightningModule):
         return y_hat, y
 
     def configure_optimizers(self):
-        optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr, weight_decay=1e-4)
-        scheduler = ReduceLROnPlateau(optimizer, mode="min", patience=10)
+        #optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr, weight_decay=1e-4)
+        optimizer = torch.optim.SGD(self.parameters(), lr=self.lr)
+        scheduler = ReduceLROnPlateau(optimizer, mode="min", patience=5)
         return [optimizer], [
             {"scheduler": scheduler, "monitor": "val_loss", "interval": "epoch"}
         ]
+    
+    def compute_class_weights(self, dataset):
+        """
+        Compute class weights for binary classification.
+
+        Args:
+            dataset: The dataset containing labels.
+
+        Returns:
+            torch.Tensor: Class weights for the positive class.
+        """
+        labels = []
+        #print(dataset[0])
+        for i in range(len(dataset)):  # Assuming dataset returns (data, label, ...)
+            labels.append(dataset[i][1].item() if isinstance(dataset[i][1], torch.Tensor) else dataset[i][1])
+
+        total_samples = len(labels)
+        positive_samples = sum(labels)
+        negative_samples = total_samples - positive_samples
+
+        # Compute weights
+        pos_weight = negative_samples / positive_samples
+        print(f"Adjusting positive class weight to: {round(pos_weight, 3)}")
+        return torch.tensor(pos_weight, dtype=torch.float32)
 
 class LitLSTM(L.LightningModule):
     """LSTM using time-series data only.
@@ -380,7 +429,7 @@ class LitLSTM(L.LightningModule):
         return loss
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
+        optimizer = torch.optim.SGD(self.parameters(), lr=self.lr)
         return optimizer
     
 class SaveLossesCallback(Callback):

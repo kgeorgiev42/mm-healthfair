@@ -93,13 +93,14 @@ if __name__ == "__main__":
     batch_size = config["data"]["batch_size"]
     n_epochs = config["train"]["epochs"]
     lr = config["train"]["learning_rate"]
+    es = config["train"]["early_stopping"]
     num_workers = config["data"]["num_workers"]
     fusion_method = config["model"]["fusion_method"]
     # overrides to True if not using mag fusion method
     ### Modality-specific config
     st_first = config["model"]["st_first"] if fusion_method == "mag" else True
     modalities = config["data"]["modalities"]
-    with_ts = True if "dynamic" in modalities else False
+    with_ts = True if "timeseries" in modalities else False
     static_only = True if (len(modalities) == 1) and ("static" in modalities) else False
     with_notes = True if "notes" in modalities else False
     ### General setup
@@ -198,6 +199,7 @@ if __name__ == "__main__":
         fusion_method=fusion_method,
         modalities=modalities,
         st_first=st_first,
+        dataset=training_set, # Pass in dataset for adjusting class weights
     )
 
     # trainer
@@ -212,7 +214,7 @@ if __name__ == "__main__":
     else:
         logger = CSVLogger("logs")
 
-    early_stop = EarlyStopping(monitor="val_loss", mode="min", patience=20)
+    early_stop = EarlyStopping(monitor="val_loss", mode="min", patience=es)
 
     mod_str = "_".join(modalities)
     checkpoint = ModelCheckpoint(
@@ -226,7 +228,7 @@ if __name__ == "__main__":
 
     trainer = L.Trainer(
         max_epochs=n_epochs,
-        log_every_n_steps=20,
+        log_every_n_steps=5,
         logger=logger,
         accelerator=device,
         callbacks=[early_stop, checkpoint, lr_monitor, save_losses_callback],

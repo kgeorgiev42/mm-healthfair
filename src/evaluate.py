@@ -162,6 +162,8 @@ if __name__ == "__main__":
             sys.exit()
         ehr_static = pl.read_csv(args.attr_path).to_pandas()
 
+    eval_path = os.path.join(args.eval_path, args.outcome)
+
     test_set = MIMIC4Dataset(
         args.data_path,
         "test",
