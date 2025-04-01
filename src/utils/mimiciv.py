@@ -292,7 +292,7 @@ def read_diagnoses_table(
     # Get list of eligible hospital episodes as historical data
     adm_lkup = admissions_data.join(
         adm_last.select(
-            ["subject_id", "edregtime", "prev_edregtime", "prev_dischtime"]
+            ["subject_id", "edregtime"]
         ).rename({"edregtime": "last_edregtime"}),
         on="subject_id",
         how="left",
@@ -829,7 +829,7 @@ def read_specialty_table(
     poe = poe.join(
         admits_last.select(["subject_id", "edregtime"]), on="subject_id", how="left"
     )
-    poe = poe.filter(pl.col("ordertime") <= pl.col("edregtime"))
+    poe = poe.filter(pl.col("ordertime") < pl.col("edregtime"))
     ### Filter order types of interest (can be extended to capture specific treatments)
     poe = poe.filter(
         pl.col("order_type").is_in(
