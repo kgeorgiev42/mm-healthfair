@@ -87,13 +87,10 @@ class MMModel(L.LightningModule):
 
         if self.with_static:
             self.embed_static = nn.Sequential(
-                nn.Linear(st_input_dim, st_embed_dim),
-                nn.ReLU(),
-                nn.Dropout(dropout),
-                nn.Linear(st_embed_dim, st_embed_dim // 2),
-                nn.ReLU(),
-                nn.Dropout(dropout),
+                nn.Linear(st_input_dim, st_embed_dim // 2),
+                nn.LayerNorm(st_embed_dim // 2),
                 nn.Linear(st_embed_dim // 2, st_embed_dim),
+                nn.Dropout(dropout),
                 nn.ReLU(),
             )
         else:
@@ -177,7 +174,7 @@ class MMModel(L.LightningModule):
             self.fc = nn.Linear((self.num_ts * ts_embed_dim), target_size)
         elif self.fusion_method == "None" and self.with_notes:
             self.fc = nn.Linear(nt_embed_dim, target_size)
-            
+
         # Compute class weights if dataset is provided
         pos_weight = self.compute_class_weights(dataset) if dataset else None
 
@@ -328,12 +325,13 @@ class MMModel(L.LightningModule):
 
     def configure_optimizers(self):
         #optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr, weight_decay=1e-4)
-        optimizer = torch.optim.SGD(self.parameters(), lr=self.lr)
+        optimizer = torch.optim.SGD(self.parameters(), lr=self.lr, weight_decay=1e-4)
+        #optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
         scheduler = ReduceLROnPlateau(optimizer, mode="min", patience=5)
         return [optimizer], [
             {"scheduler": scheduler, "monitor": "val_loss", "interval": "epoch"}
         ]
-    
+
     def compute_class_weights(self, dataset):
         """
         Compute class weights for binary classification.
@@ -429,9 +427,9 @@ class LitLSTM(L.LightningModule):
         return loss
 
     def configure_optimizers(self):
-        optimizer = torch.optim.SGD(self.parameters(), lr=self.lr)
+        optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
         return optimizer
-    
+
 class SaveLossesCallback(Callback):
     def __init__(self, log_dir="logs", save_every_n_epochs=5):
         """
@@ -468,8 +466,8 @@ class SaveLossesCallback(Callback):
             with open(self.csv_file, mode="a", newline="") as f:
                 writer = csv.writer(f)
                 writer.writerow([
-                    trainer.current_epoch + 1, 
-                    train_loss.item() if train_loss is not None else None, 
+                    trainer.current_epoch + 1,
+                    train_loss.item() if train_loss is not None else None,
                     val_loss.item() if val_loss is not None else None
                 ])
 

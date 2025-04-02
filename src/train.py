@@ -72,6 +72,11 @@ if __name__ == "__main__":
         help="Randomly sample subjects for testing. Training set will equal sample, validation set will be 1/5th of sample.",
     )
     parser.add_argument(
+        "--use_class_weights",
+        action="store_true",
+        help="Whether to use class weights for training. Defaults to False.",
+    )
+    parser.add_argument(
         "--project",
         type=str,
         default="nhs-mm-healthfair",
@@ -199,7 +204,7 @@ if __name__ == "__main__":
         fusion_method=fusion_method,
         modalities=modalities,
         st_first=st_first,
-        dataset=training_set, # Pass in dataset for adjusting class weights
+        dataset=training_set if args.use_class_weights else None, # Pass in dataset for adjusting class weights
     )
 
     # trainer

@@ -19,3 +19,8 @@ labels = ['<50', '50-59', '60-69', '70-79', '80+']
 [timeseries]
 vitals_freq = '30m'
 lab_freq = '5h'
+
+[paths]
+model_paths = ["ext_stay_7_None_timeseries", "ext_stay_7_concat_static_timeseries", "ext_stay_7_concat_static_timeseries_notes"]
+model_names = ["ES(TS)", "ES(EF-EHR+TS)", "ES(EF-EHR+TS+NT)"]
+model_colors = ["#a50026", "#fc8d59", "#abd9e9"]

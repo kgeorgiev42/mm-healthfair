@@ -74,7 +74,7 @@ class CollateTimeSeries:
                 )
                 events = [data[2][ts][:min_events] for data in batch]
                 dynamic.append(events)
-                
+
             if notes is not None:
                 return static, labels, dynamic, lengths, notes
             else:
@@ -138,7 +138,7 @@ class MIMIC4Dataset(Dataset):
                 emblist = []
                 for emb in notes:
                     emblist.append(emb[1])
-                    
+
                 notes = torch.tensor(emblist, dtype=torch.float32).unsqueeze(0)
                 notes = torch.nn.functional.pad(notes, (0, 768 - notes.shape[1]))
                 return static, label, dynamic, notes

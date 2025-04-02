@@ -23,28 +23,32 @@ if __name__ == "__main__":
         "data_path",
         type=str,
         help="Path to the pickled data dictionary generated from prepare_data.py.",
-        default="../outputs/prep_data/mmfair_feat.pkl",
+        default="../outputs/processed_data/mmfair_feat.pkl",
     )
     parser.add_argument(
-        "col_path",
+        "--col_path",
+        "-p",
         type=str,
         help="Path to the pickled column dictionary generated from prepare_data.py.",
-        default="../outputs/prep_data/mmfair_cols.pkl",
+        default="../outputs/processed_data/mmfair_cols.pkl",
     )
     parser.add_argument(
-        "ids_path",
+        "--ids_path",
+        "-i",
         type=str,
         help="Directory containing train/val/test ids.",
-        default="../outputs/prep_data",
+        default="../outputs/processed_data",
     )
     parser.add_argument(
-        "attr_path",
+        "--attr_path",
+        "-a",
         type=str,
         help="Directory containing attributes metadata (original ehr_static.csv).",
-        default="../outputs/ext_data/ehr_static.csv",
+        default="../outputs/sample_data/ehr_static.csv",
     )
     parser.add_argument(
-        "eval_path",
+        "--eval_path",
+        "-e",
         type=str,
         help="Directory to store performance plots.",
         default="../outputs/evaluation",
@@ -58,9 +62,16 @@ if __name__ == "__main__":
         default="in_hosp_death",
     )
     parser.add_argument(
-        "model_path",
+        "--model_dir",
         type=str,
-        help="Path to the saved model.",
+        help="Directory containing the saved model metadata.",
+        default="logs/nhs-mm-healthfair",
+    )
+    parser.add_argument(
+        "--model_path",
+        "-m",
+        type=str,
+        help="Directory pointing to the saved model checkpoint (must be inside model_dir).",
     )
     parser.add_argument(
         "--config",
@@ -88,9 +99,9 @@ if __name__ == "__main__":
         help="Show stratified decile analysis by attribute.",
     )
     parser.add_argument(
-        "--all_outcomes",
+        "--group_models",
         action="store_true",
-        help="Generate Precision-Recall summary across outcomes in targets.toml."
+        help="Generate Precision-Recall summary across all models specified in targets.toml."
     )
     parser.add_argument(
         "--verbose",
@@ -98,46 +109,66 @@ if __name__ == "__main__":
         dest="verbose",
         action="store_true",
         default=False,
-        help="Control verbosity. If true, will make more .collect() calls to compute dataset size.",
+        help="Control verbosity.",
     )
 
     args = parser.parse_args()
     config = toml.load(args.config)
     targets = toml.load(args.targets)
-    fusion_method = config["model"]["fusion_method"]
-    modalities = config["data"]["modalities"]
+    model_path = os.path.join(os.path.join(args.model_dir, args.model_path), args.model_path + ".ckpt")
+    loss_path = os.path.join(os.path.join(args.model_dir, args.model_path), "losses.csv")
+    eval_path = os.path.join(args.eval_path, args.model_path)
+    num_workers = config["data"]["num_workers"]
+    modalities = []
+    for arg in args.model_path.split("_"):
+        if 'static' in arg:
+            modalities.append('static')
+        elif 'timeseries' in arg:
+            modalities.append('timeseries')
+        elif 'notes' in arg:
+            modalities.append('notes')
+
     static_only = True if (len(modalities) == 1) and ("static" in modalities) else False
     with_notes = True if "notes" in modalities else False
-    batch_size = config["data"]["batch_size"]
-    mod_str = "_".join(modalities)
+    fusion_method = "None"
+    if "mag" in args.model_path:
+        fusion_method = "EF-mag"
+    elif "concat" in args.model_path:
+        fusion_method = "EF-concat"
+
     ### General setup
     outcomes = targets["outcomes"]["labels"]
     outcomes_disp = targets["outcomes"]["display"]
     outcomes_col = targets["outcomes"]["colormap"]
     attributes = targets["attributes"]["labels"]
     attr_disp = targets["attributes"]["display"]
-    ### For Pre-loading models if using --all_outcomes
-    paths = config["paths"]["model_paths"]
+    batch_size = config["data"]["batch_size"]
+    ### For Pre-loading models if using --group_models
+    model_paths = targets["paths"]["model_paths"]
+    model_names = targets["paths"]["model_names"]
+    model_colors = targets["paths"]["model_colors"]
     if args.outcome not in outcomes:
         print(f"Outcome {args.outcome} must be included in targets.toml.")
         sys.exit()
+    if not os.path.exists(eval_path):
+        os.makedirs(eval_path)
     outcome_idx = outcomes.index(args.outcome)
     ### Set plotting style
     plt.rcParams.update(
-        {"font.size": 12, "font.weight": "normal", "font.family": "serif"}
+        {"font.size": 13, "font.weight": "normal", "font.family": "serif"}
     )
     print('------------------------------------------')
     print("MMHealthFair: Multimodal evaluation pipeline")
-    ### If --all_outcomes, load results dictionary and generate summary
-    if args.all_outcomes:
+    ### If --group_models, load results dictionary and generate summary
+    if args.group_models:
         print("Generating Precision-Recall summary across all outcomes...")
         res_all = {}
-        for outcome, path in zip(outcomes, args.paths):
+        for model, path in zip(model_names, model_paths):
             res_dict = load_pickle(path)
-            res_all[outcome] = res_dict
-        get_all_roc_pr_summary(res_all, outcomes_disp, outcomes_col,
-                               output_roc_path=f"{args.eval_path}/roc_full_{args.fusion_method}_{mod_str}.png",
-                               output_pr_path=f"{args.eval_path}/pr_full_{args.fusion_method}_{mod_str}.png")
+            res_all[model] = res_dict
+        get_all_roc_pr_summary(res_all, model_names, model_colors,
+                               output_roc_path=f"{eval_path}/roc_full_{args.model_path}.png",
+                               output_pr_path=f"{eval_path}/pr_full_{args.model_path}.png")
         print("Evaluation complete.")
         sys.exit()
     print(f'Evaluating performance for outcome "{outcomes_disp[outcome_idx]}"')
@@ -150,22 +181,30 @@ if __name__ == "__main__":
     #static_only = True if model_type == "rf" else False
 
     # Get test ids
-    if len(glob.glob(os.path.join(args.ids_path, "test_ids_" + {args.outcome} + ".csv"))) == 0:
+    if len(glob.glob(os.path.join(args.ids_path, "testing_ids_" + args.outcome + ".csv"))) == 0:
         print(f"No test ids found for outcome {args.outcome}. Exiting..")
         sys.exit()
-    test_ids = pl.read_csv(os.path_join(args.ids_path, "test_ids_" + {args.outcome} + ".csv")).select("subject_id").to_numpy()
 
-    if args.by_attribute:
+    if (len(model_path) == 0) and (args.group_models == False):
+        print(f"No model found at {args.model_path}. Exiting..")
+        sys.exit()
+
+    if (len(loss_path) == 0) and (args.group_models == False):
+        print(f"No losses.csv found at {args.model_path}. Exiting..")
+        sys.exit()
+
+    test_ids = pl.read_csv(os.path.join(args.ids_path, "testing_ids_" + args.outcome + ".csv")).select("subject_id").to_numpy().flatten()
+
+    if args.strat_by_attr:
         print("Reading attributes metadata for stratified decile analysis...")
         if not os.path.exists(args.attr_path):
             print("Attributes metadata not found. Exiting...")
             sys.exit()
         ehr_static = pl.read_csv(args.attr_path).to_pandas()
 
-    eval_path = os.path.join(args.eval_path, args.outcome)
-
     test_set = MIMIC4Dataset(
         args.data_path,
+        args.col_path,
         "test",
         ids=test_ids,
         static_only=static_only,
@@ -175,44 +214,49 @@ if __name__ == "__main__":
     test_dataloader = DataLoader(
         test_set,
         batch_size=batch_size,
-        collate_fn=CollateFn() if static_only else CollateTimeSeries()
+        num_workers=num_workers,
+        collate_fn=CollateFn() if static_only else CollateTimeSeries(),
+        persistent_workers=True if num_workers > 0 else False
     )
 
-    model = MMModel.load_from_checkpoint(checkpoint_path=args.model_path)
+    model = MMModel.load_from_checkpoint(checkpoint_path=model_path)
     print("Evaluating on test data...")
     trainer = Trainer(accelerator="gpu")
     output = trainer.predict(model, dataloaders=test_dataloader)
     default_thresh = 0.5
-    prob = concat([out[0] for out in output])
+    prob = np.array(concat([out[0] for out in output])).flatten().astype(np.float32)
     y_hat = np.where(prob > default_thresh, 1, 0)
-    y_test = concat([out[1] for out in output])
+    y_test = np.array(concat([out[1] for out in output])).flatten().astype(np.int8)
 
     ### Performance summary
+    print('------------------------------------------')
     print('Plotting learning curve...')
-    if not os.path.exists(args.eval_path):
-        os.makedirs(args.eval_path)
-    log_dir=f"logs/{args.outcome}_{args.fusion_method}_{mod_str}/losses.csv"
-    plot_learning_curve(log_dir, output_path=f"{args.eval_path}/lc_{args.outcome}_{args.fusion_method}_{mod_str}.png")
-    print('Getting ROC/PR curves...')
-    plot_roc(y_test, prob, outcome=args.outcome, output_path=f"{args.eval_path}/roc_{args.outcome}_{args.fusion_method}_{mod_str}.png")
-    plot_pr(y_test, prob, outcome=args.outcome, output_path=f"{args.eval_path}/pr_{args.outcome}_{args.fusion_method}_{mod_str}.png")
+    if not os.path.exists(eval_path):
+        os.makedirs(eval_path)
+
+    plot_learning_curve(loss_path, output_path=f"{eval_path}/lc_{args.model_path}.png")
+    print('------------------------------------------')
     print('ROC performance report:')
     print('------------------------------------------')
     bin_labels, res_roc_dict = get_roc_performance(y_test, prob, verbose=args.verbose)
     print('------------------------------------------')
     print('Precision-Recall performance report:')
     print('------------------------------------------')
-    bin_labels, res_pr_dict = get_pr_performance(y_test, prob, bin_labels, 
-                                              opt_f1=True, verbose=args.verbose)
+    res_pr_dict = get_pr_performance(y_test, prob, bin_labels, 
+                                    opt_f1=True, verbose=args.verbose)
     print('------------------------------------------')
+    print('Getting ROC/PR curves...')
+    plot_roc(y_test, prob, outcome=outcomes_disp[outcome_idx], result_dict=res_roc_dict, output_path=f"{eval_path}/roc_{args.model_path}.png")
+    plot_pr(y_test, prob, outcome=outcomes_disp[outcome_idx], result_dict=res_pr_dict, output_path=f"{eval_path}/pr_{args.model_path}.png")
     print('Plotting calibration curve...')
-    plot_calibration_curve(y_test, prob, outcome=args.outcome, n_bins=args.n_bins,
-                           output_path=f"{args.eval_path}/calib_{args.outcome}_{args.fusion_method}_{mod_str}.png")
+    plot_calibration_curve(y_test, prob, outcome=outcomes_disp[outcome_idx],
+                           n_bins=args.n_bins,
+                           output_path=f"{eval_path}/calib_{args.model_path}.png")
     print('------------------------------------------')
     print('Prediction decile analysis:')
     print('------------------------------------------')
     res_pd_dict = rank_prediction_deciles(y_test, prob, args.n_bins,
-                                          args.outcome, output_path=f"{args.eval_path}/rstrat_{args.outcome}_{args.fusion_method}_{mod_str}.png",
+                                          outcomes_disp[outcome_idx], output_path=f"{eval_path}/rstrat_{args.model_path}.png",
                                           by_attribute=args.strat_by_attr,
                                           attrs=attributes, attr_disp=attr_disp,
                                           test_ids=test_ids,
@@ -221,24 +265,6 @@ if __name__ == "__main__":
     print('------------------------------------------')
     print('Saving results dictionary...')
     res_dict = res_roc_dict | res_pr_dict | res_pd_dict
-    save_pickle(res_dict, args.eval_path, "performance_{args.outcome}_{args.fusion_method}_{mod_str}.pkl")
+    save_pickle(res_dict, eval_path, f"pf_{args.model_path}.pkl")
+    print(f"Saved results dictionary to {eval_path}/pf_{args.model_path}.pkl")
     print('Evaluation complete.')
-
-    '''
-    if model_type == "rf":
-        print("Loading dataset...")
-        x_test = []
-        y_test = []
-        for data in test_set:
-            x, y = data
-            x_test.append(x[0])
-            y_test.append(y[0])
-
-        x_test = np.array(x_test)
-        y_test = np.array(y_test)
-
-        model = load_pickle(args.model_path)
-        print("Evaluating on test data...")
-        y_hat = model.predict(x_test)
-        prob = model.predict_proba(x_test)[:, 1]'
-    '''
