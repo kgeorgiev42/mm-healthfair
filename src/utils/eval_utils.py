@@ -72,7 +72,7 @@ def plot_pr(y_test: np.array, prob: np.array,
     plt.plot([0, 1], [prevalence, prevalence], color='navy', lw=1.5, linestyle='--')
     plt.xlabel('Recall')
     plt.ylabel('Precision')
-    plt.title(f'PR ({outcome}, prevalence {(100*prevalence):.2f})%')
+    plt.title(f'PR ({outcome}, prevalence {(100*prevalence):.2f}%)')
     plt.legend(loc="lower right")
     plt.savefig(output_path)
     print(f"Precision-Recall curve saved to {output_path}")
@@ -121,14 +121,18 @@ def expect_f1(y_prob: np.array, thres: int) -> float:
     Returns:
         float: Expected F1 score.
     """
-    y_pred = (y_prob >= thres).astype(int)
-    tp = np.sum((y_pred == 1) & (y_prob == 1))
-    fp = np.sum((y_pred == 1) & (y_prob == 0))
-    fn = np.sum((y_pred == 0) & (y_prob == 1))
-    precision = tp / (tp + fp)
-    recall = tp / (tp + fn)
-    f1 = 2 * (precision * recall) / (precision + recall)
-    return f1
+    #y_pred = (y_prob >= thres).astype(int)
+    idx_tp = np.where(y_prob >= thres)[0]
+    idx_fn = np.where(y_prob < thres)[0]
+    tp = y_prob[idx_tp].sum()
+    fn = y_prob[idx_fn].sum()
+    fp = len(idx_tp) - tp
+    #fp = np.sum((y_pred == 1) & (y_prob == 0))
+    #fn = np.sum((y_pred == 0) & (y_prob == 1))
+    #precision = tp / (tp + fp)
+    #recall = tp / (tp + fn)
+    #f1 = 2 * (precision * recall) / (precision + recall)
+    return 2 * tp / (2 * tp + fp + fn) if (2 * tp + fp + fn) > 0 else 0
 
 def optimal_threshold(y_prob: np.array) -> float:
     """
@@ -140,9 +144,11 @@ def optimal_threshold(y_prob: np.array) -> float:
     Returns:
         float: Optimal threshold.
     """
-    thresholds = np.linspace(0, 1, 100)
-    f1_scores = [expect_f1(y_prob, thres) for thres in thresholds]
-    optimal_thres = thresholds[np.argmax(f1_scores)]
+    #thresholds = np.linspace(0, 1, 100)
+    y_prob = np.sort(y_prob[::-1])
+    f1_scores = [expect_f1(y_prob, p) for p in y_prob]
+    #optimal_thres = thresholds[np.argmax(f1_scores)]
+    optimal_thres = y_prob[np.argmax(f1_scores)]
     return optimal_thres
 
 def get_roc_performance(y_test: np.array, prob: np.array,
@@ -159,8 +165,8 @@ def get_roc_performance(y_test: np.array, prob: np.array,
         print('Classification report for J threshold:')
         print(classification_report(y_test, bin_labels, target_names=['0', '1']))
 
-    print(y_test, y_test.shape)
-    print(prob, prob.shape)
+    #print(y_test, y_test.shape)
+    #print(prob, prob.shape)
     aucss, ci = cfi.roc_auc_score(y_test, prob, confidence_level=0.95)
     ppv, cip = cfi.ppv_score(y_test, bin_labels, confidence_level=0.95)
     npv, cin = cfi.npv_score(y_test, bin_labels, confidence_level=0.95)
@@ -175,15 +181,15 @@ def get_roc_performance(y_test: np.array, prob: np.array,
     res_dict_roc['roc_auc'] = aucss
     res_dict_roc['roc_upper'] = ci[1]
     res_dict_roc['roc_lower'] = ci[0]
-    res_dict_roc['fpr'] = fpr
-    res_dict_roc['tpr'] = tpr
+    #res_dict_roc['fpr'] = fpr
+    #res_dict_roc['tpr'] = tpr
     return bin_labels, res_dict_roc
 
 def get_pr_performance(y_test: np.array, prob: np.array,
                        bin_labels: np.array, opt_f1: bool = True,
                        verbose: bool = False):
     
-    precision, recall, th = precision_recall_curve(y_test, prob, pos_label=1)
+    precision, recall, _ = precision_recall_curve(y_test, prob, pos_label=1)
     res_dict_pr = {}
     ### Get F1 score
     f1 = f1_score(y_test, bin_labels)
@@ -203,10 +209,10 @@ def get_pr_performance(y_test: np.array, prob: np.array,
         tnr, cit = cfi.tnr_score(y_test, bin_labels, confidence_level=0.95)
         tpr, cis = cfi.tpr_score(y_test, bin_labels, confidence_level=0.95)
         if verbose:
-            print("PPV: {:.3f} [{:.3f}, {:.3f}]".format(ppv, cip[0], cip[1]))
-            print("NPV: {:.3f} [{:.3f}, {:.3f}]".format(npv, cin[0], cin[1]))
-            print("Specificity: {:.3f} [{:.3f}, {:.3f}]".format(tnr, cit[0], cit[1]))
-            print("Sensitivity: {:.3f} [{:.3f}, {:.3f}]".format(tpr, cis[0], cis[1]))
+            print("PPV (Precision): {:.3f} [{:.3f}, {:.3f}]".format(ppv, cip[0], cip[1]))
+            print("NPV (N-Precision): {:.3f} [{:.3f}, {:.3f}]".format(npv, cin[0], cin[1]))
+            print("Specificity (TNR): {:.3f} [{:.3f}, {:.3f}]".format(tnr, cit[0], cit[1]))
+            print("Sensitivity (TPR): {:.3f} [{:.3f}, {:.3f}]".format(tpr, cis[0], cis[1]))
 
     ### Get 95% CI for PR AUC by computing covariance matrix from Z-score
     fp = np.sum((bin_labels == 1) & (y_test == 0))
@@ -227,8 +233,8 @@ def get_pr_performance(y_test: np.array, prob: np.array,
     ub = auc_score + 1.96 * auc_se
     if verbose:
         print("PR-AUC with 95% CI: {:.3f} [{:.3f}, {:.3f}]".format(auc_score, lb, ub))
-        print("Precision: {:.3f} [{:.3f}, {:.3f}]".format(prec_s, cip[0], cip[1]))
-        print("Recall: {:.3f} [{:.3f}, {:.3f}]".format(recall_s, cin[0], cin[1]))
+        #print("Precision: {:.3f} [{:.3f}, {:.3f}]".format(prec_s, cip[0], cip[1]))
+        #print("Recall: {:.3f} [{:.3f}, {:.3f}]".format(recall_s, cin[0], cin[1]))
     res_dict_pr['pr_auc'] = auc_score
     res_dict_pr['pr_upper'] = ub
     res_dict_pr['pr_lower'] = lb
@@ -242,11 +248,21 @@ def get_all_roc_pr_summary(res_dicts: list,
                            colors: list = [],
                            output_roc_path: str = "roc_summary.png",
                            output_pr_path: str = "pr_summary.png"):
-    plt.figure(figsize=(6, 6))
+    plt.figure(figsize=(8, 5))
     for res_dict, model, color in zip(res_dicts, models, colors):
-        plt.plot(res_dict['fpr'], res_dict['tpr'], 
+        fpr, tpr, _ = roc_curve(res_dict['y_test'], res_dict['y_prob'], pos_label=1)
+        plt.plot(fpr, tpr, 
                  color=color, lw=1.5, 
                  label=f'{model} (AUC = {res_dict["roc_auc"]:.3f} [{res_dict["roc_lower"]:.3f}, {res_dict["roc_upper"]:.3f}])')
+        ### Get 95% CI for TPR by computing covariance matrix from Z-score
+        tpr_se = np.sqrt((tpr * (1 - tpr)) / len(res_dict['y_test']))
+        z = stats.norm.ppf(1 - 0.05 / 2)
+        tpr_lower = np.maximum(tpr - z * tpr_se, 0)
+        tpr_upper = np.minimum(tpr + z * tpr_se, 1)
+        plt.fill_between(fpr, 
+                        tpr_lower, 
+                        tpr_upper, 
+                        color=color, alpha=0.3)
     plt.plot([0, 1], [0, 1], color='navy', lw=1.5, linestyle='--', label='Random')
     plt.xlabel('False Positive Rate')
     plt.ylabel('True Positive Rate')
@@ -256,17 +272,19 @@ def get_all_roc_pr_summary(res_dicts: list,
     plt.savefig(output_roc_path)
     print(f"ROC summary saved to {output_roc_path}")
 
-    plt.figure(figsize=(6, 6))
+    plt.figure(figsize=(8, 5))
     for res_dict, model, color in zip(res_dicts, models, colors):
-        plt.plot(res_dict['recall'], res_dict['prec'], 
+        precision, recall, _ = precision_recall_curve(res_dict['y_test'], res_dict['y_prob'], pos_label=1)
+        plt.plot(recall, precision, 
                  color=color, lw=1.5, 
-                 label=f'{model} (AUC = {res_dict["pr_auc"]:.3f} [{res_dict["pr_lower"][0]:.3f}, {res_dict["pr_upper"][1]:.3f}])')
-        plt.plot([0,1], [res_dict['prevalence'], res_dict['prevalence']], color=color, lw=1.5, linestyle='--')
+                 label=f'{model} (AUC = {res_dict["pr_auc"]:.3f} [{res_dict["pr_lower"]:.3f}, {res_dict["pr_upper"]:.3f}])')
+        
+    plt.plot([0,1], [res_dict['prevalence'], res_dict['prevalence']], color='black', lw=1.5, linestyle='--')
 
     plt.xlabel('Recall')
     plt.ylabel('Precision')
     plt.title('Precision-Recall Curve (all models)')
-    plt.legend(loc="lower right")
+    plt.legend(loc="upper right")
     plt.tight_layout()
     plt.savefig(output_pr_path)
     print(f"PR summary saved to {output_pr_path}")
@@ -306,7 +324,6 @@ def rank_prediction_deciles(y_test: np.array, prob: np.array,
     plt.legend(loc="upper left")
     plt.savefig(output_path)
     print(f"Risk stratification plot saved to {output_path}")
-    res_dict['outcome_prev'] = avg_resp
     res_dict['10th_decile_rr'] = dec_stats['rr'].iloc[-1]
     #### If stratifying by attribute plot the risk decile distribution for each attribute
     if by_attribute:
@@ -320,7 +337,7 @@ def rank_prediction_deciles(y_test: np.array, prob: np.array,
             eval_long = eval_long.groupby(['decile', f'{attr}_Value'])['decile'].size().reset_index(name='Count')
             eval_y = eval_long.groupby('decile')['Count'].apply(lambda x: x.sum()).reset_index().rename(columns={'Count': 'Total'})
             eval_long = eval_long.merge(eval_y, on='decile', how='left')
-            eval_long['Percentage'] = round(eval_long['Count'] / eval_long['Total'], 2)
+            eval_long['Percentage'] = round(eval_long['Count'] / eval_long['Total'], 5)
             ax = pd.pivot_table(eval_long[['decile', f'{attr}_Value', 'Percentage']], index='decile', 
                                 columns=f'{attr}_Value').plot(kind='bar', stacked=True, figsize=(9, 5),
                                                               title=f'Risk profiles: {outcome} by {disp}',

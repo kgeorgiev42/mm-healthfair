@@ -115,26 +115,31 @@ if __name__ == "__main__":
     args = parser.parse_args()
     config = toml.load(args.config)
     targets = toml.load(args.targets)
-    model_path = os.path.join(os.path.join(args.model_dir, args.model_path), args.model_path + ".ckpt")
-    loss_path = os.path.join(os.path.join(args.model_dir, args.model_path), "losses.csv")
-    eval_path = os.path.join(args.eval_path, args.model_path)
-    num_workers = config["data"]["num_workers"]
-    modalities = []
-    for arg in args.model_path.split("_"):
-        if 'static' in arg:
-            modalities.append('static')
-        elif 'timeseries' in arg:
-            modalities.append('timeseries')
-        elif 'notes' in arg:
-            modalities.append('notes')
 
-    static_only = True if (len(modalities) == 1) and ("static" in modalities) else False
-    with_notes = True if "notes" in modalities else False
-    fusion_method = "None"
-    if "mag" in args.model_path:
-        fusion_method = "EF-mag"
-    elif "concat" in args.model_path:
-        fusion_method = "EF-concat"
+    ### Config setup for single-model evaluation
+    if not args.group_models:
+        model_path = os.path.join(os.path.join(args.model_dir, args.model_path), args.model_path + ".ckpt")
+        loss_path = os.path.join(os.path.join(args.model_dir, args.model_path), "losses.csv")
+        eval_path = os.path.join(args.eval_path, args.model_path)
+        if not os.path.exists(eval_path):
+            os.makedirs(eval_path)
+        num_workers = config["data"]["num_workers"]
+        modalities = []
+        for arg in args.model_path.split("_"):
+            if 'static' in arg:
+                modalities.append('static')
+            elif 'timeseries' in arg:
+                modalities.append('timeseries')
+            elif 'notes' in arg:
+                modalities.append('notes')
+
+        static_only = True if (len(modalities) == 1) and ("static" in modalities) else False
+        with_notes = True if "notes" in modalities else False
+        fusion_method = "None"
+        if "mag" in args.model_path:
+            fusion_method = "EF-mag"
+        elif "concat" in args.model_path:
+            fusion_method = "EF-concat"
 
     ### General setup
     outcomes = targets["outcomes"]["labels"]
@@ -150,8 +155,6 @@ if __name__ == "__main__":
     if args.outcome not in outcomes:
         print(f"Outcome {args.outcome} must be included in targets.toml.")
         sys.exit()
-    if not os.path.exists(eval_path):
-        os.makedirs(eval_path)
     outcome_idx = outcomes.index(args.outcome)
     ### Set plotting style
     plt.rcParams.update(
@@ -162,13 +165,15 @@ if __name__ == "__main__":
     ### If --group_models, load results dictionary and generate summary
     if args.group_models:
         print("Generating Precision-Recall summary across all outcomes...")
-        res_all = {}
+        res_all = []
         for model, path in zip(model_names, model_paths):
-            res_dict = load_pickle(path)
-            res_all[model] = res_dict
+            r_path = os.path.join(os.path.join(args.eval_path, path), "pf_" + path + ".pkl")
+            res_dict = load_pickle(r_path)
+            res_all.append(res_dict)
+
         get_all_roc_pr_summary(res_all, model_names, model_colors,
-                               output_roc_path=f"{eval_path}/roc_full_{args.model_path}.png",
-                               output_pr_path=f"{eval_path}/pr_full_{args.model_path}.png")
+                            output_roc_path=f"{args.eval_path}/roc_full_{path}.png",
+                            output_pr_path=f"{args.eval_path}/pr_full_{path}.png")
         print("Evaluation complete.")
         sys.exit()
     print(f'Evaluating performance for outcome "{outcomes_disp[outcome_idx]}"')
@@ -250,7 +255,7 @@ if __name__ == "__main__":
     plot_pr(y_test, prob, outcome=outcomes_disp[outcome_idx], result_dict=res_pr_dict, output_path=f"{eval_path}/pr_{args.model_path}.png")
     print('Plotting calibration curve...')
     plot_calibration_curve(y_test, prob, outcome=outcomes_disp[outcome_idx],
-                           n_bins=args.n_bins,
+                           n_bins=20,
                            output_path=f"{eval_path}/calib_{args.model_path}.png")
     print('------------------------------------------')
     print('Prediction decile analysis:')
@@ -265,6 +270,9 @@ if __name__ == "__main__":
     print('------------------------------------------')
     print('Saving results dictionary...')
     res_dict = res_roc_dict | res_pr_dict | res_pd_dict
+    ### Record ground-truths and probabilities
+    res_dict["y_test"] = y_test
+    res_dict["y_prob"] = prob
     save_pickle(res_dict, eval_path, f"pf_{args.model_path}.pkl")
     print(f"Saved results dictionary to {eval_path}/pf_{args.model_path}.pkl")
     print('Evaluation complete.')
