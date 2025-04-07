@@ -289,7 +289,7 @@ def get_all_roc_pr_summary(res_dicts: list,
     plt.savefig(output_pr_path)
     print(f"PR summary saved to {output_pr_path}")
 
-def rank_prediction_deciles(y_test: np.array, prob: np.array,
+def rank_prediction_quantiles(y_test: np.array, prob: np.array,
                             n_bins: int = 10, outcome: str = "In-hospital Death",
                             output_path: str = "risk_strat.png",
                             by_attribute: bool = False,
@@ -298,15 +298,15 @@ def rank_prediction_deciles(y_test: np.array, prob: np.array,
                             attr_features: pd.DataFrame = None,
                             verbose: bool = False):
     if verbose:
-        print(f"Ranking prediction deciles for {outcome}..")
+        print(f"Ranking prediction quantiles for {outcome}..")
     res_dict = {}
     lkup_df = pd.DataFrame()
     lkup_df['prob'] = prob
     lkup_df['label'] = y_test
-    lkup_df['decile'] = pd.qcut(prob, n_bins, labels=False) + 1
+    lkup_df['quantile'] = pd.qcut(prob, n_bins, labels=False) + 1
     avg_resp = lkup_df['label'].mean() * 100
-    dec_stats = lkup_df.groupby('decile')['label'].sum().reset_index()
-    samples = lkup_df.groupby('decile')['label'].count().reset_index().iloc[:, 1:2]
+    dec_stats = lkup_df.groupby('quantile')['label'].sum().reset_index()
+    samples = lkup_df.groupby('quantile')['label'].count().reset_index().iloc[:, 1:2]
     samples.columns = ['total']
     dec_stats['rr'] = round((dec_stats['label'] / samples['total']) * 100, 2)
     ### Plot risk stratification
@@ -324,21 +324,22 @@ def rank_prediction_deciles(y_test: np.array, prob: np.array,
     plt.legend(loc="upper left")
     plt.savefig(output_path)
     print(f"Risk stratification plot saved to {output_path}")
-    res_dict['10th_decile_rr'] = dec_stats['rr'].iloc[-1]
-    #### If stratifying by attribute plot the risk decile distribution for each attribute
+    res_dict['10th_quantile_rr'] = dec_stats['rr'].iloc[-1]
+    res_dict['risk_quantile'] = lkup_df['quantile'].values.tolist()
+    #### If stratifying by attribute plot the risk quantile distribution for each attribute
     if by_attribute:
         lkup_df['subject_id'] = test_ids
         attr_features = attr_features[attr_features['subject_id'].isin(test_ids)]
         lkup_df = lkup_df.merge(attr_features, on='subject_id', how='left')
         for attr, disp in zip(attrs, attr_disp):
             if verbose:
-                print(f"Plotting stratified decile plot for: {disp}")
-            eval_long = pd.melt(lkup_df, id_vars=['decile'], value_vars=[attr], value_name=f'{attr}_Value')
-            eval_long = eval_long.groupby(['decile', f'{attr}_Value'])['decile'].size().reset_index(name='Count')
-            eval_y = eval_long.groupby('decile')['Count'].apply(lambda x: x.sum()).reset_index().rename(columns={'Count': 'Total'})
-            eval_long = eval_long.merge(eval_y, on='decile', how='left')
+                print(f"Plotting stratified quantile plot for: {disp}")
+            eval_long = pd.melt(lkup_df, id_vars=['quantile'], value_vars=[attr], value_name=f'{attr}_Value')
+            eval_long = eval_long.groupby(['quantile', f'{attr}_Value'])['quantile'].size().reset_index(name='Count')
+            eval_y = eval_long.groupby('quantile')['Count'].apply(lambda x: x.sum()).reset_index().rename(columns={'Count': 'Total'})
+            eval_long = eval_long.merge(eval_y, on='quantile', how='left')
             eval_long['Percentage'] = round(eval_long['Count'] / eval_long['Total'], 5)
-            ax = pd.pivot_table(eval_long[['decile', f'{attr}_Value', 'Percentage']], index='decile', 
+            ax = pd.pivot_table(eval_long[['quantile', f'{attr}_Value', 'Percentage']], index='quantile', 
                                 columns=f'{attr}_Value').plot(kind='bar', stacked=True, figsize=(9, 5),
                                                               title=f'Risk profiles: {outcome} by {disp}',
                                                               colormap='tab10')

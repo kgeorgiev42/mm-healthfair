@@ -14,7 +14,7 @@ from lightning.pytorch import Trainer
 from models import MMModel
 from torch import concat
 from torch.utils.data import DataLoader
-from utils.eval_utils import get_all_roc_pr_summary, get_pr_performance, get_roc_performance, plot_calibration_curve, plot_learning_curve, plot_pr, plot_roc, rank_prediction_deciles
+from utils.eval_utils import get_all_roc_pr_summary, get_pr_performance, get_roc_performance, plot_calibration_curve, plot_learning_curve, plot_pr, plot_roc, rank_prediction_quantiles
 from utils.functions import load_pickle, save_pickle
 
 if __name__ == "__main__":
@@ -36,7 +36,7 @@ if __name__ == "__main__":
         "--ids_path",
         "-i",
         type=str,
-        help="Directory containing train/val/test ids.",
+        help="Directory containing test ids.",
         default="../outputs/processed_data",
     )
     parser.add_argument(
@@ -91,12 +91,12 @@ if __name__ == "__main__":
         "--n_bins",
         type=int,
         default=10,
-        help="Number of bins for decile analysis and calibration curve.",
+        help="Number of bins for quantile analysis and calibration curve.",
     )
     parser.add_argument(
         "--strat_by_attr",
         action="store_true",
-        help="Show stratified decile analysis by attribute.",
+        help="Show stratified quantile analysis by attribute.",
     )
     parser.add_argument(
         "--group_models",
@@ -201,7 +201,7 @@ if __name__ == "__main__":
     test_ids = pl.read_csv(os.path.join(args.ids_path, "testing_ids_" + args.outcome + ".csv")).select("subject_id").to_numpy().flatten()
 
     if args.strat_by_attr:
-        print("Reading attributes metadata for stratified decile analysis...")
+        print("Reading attributes metadata for stratified quantile analysis...")
         if not os.path.exists(args.attr_path):
             print("Attributes metadata not found. Exiting...")
             sys.exit()
@@ -258,9 +258,9 @@ if __name__ == "__main__":
                            n_bins=20,
                            output_path=f"{eval_path}/calib_{args.model_path}.png")
     print('------------------------------------------')
-    print('Prediction decile analysis:')
+    print('Prediction quantile analysis:')
     print('------------------------------------------')
-    res_pd_dict = rank_prediction_deciles(y_test, prob, args.n_bins,
+    res_pd_dict = rank_prediction_quantiles(y_test, prob, args.n_bins,
                                           outcomes_disp[outcome_idx], output_path=f"{eval_path}/rstrat_{args.model_path}.png",
                                           by_attribute=args.strat_by_attr,
                                           attrs=attributes, attr_disp=attr_disp,
