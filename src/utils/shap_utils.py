@@ -135,7 +135,7 @@ def get_shap_group_difference(shap_values, risk_dict, risk_quantile: int = 10, f
     if verbose:
         print(f"Group difference plot saved to {save_path}")
 
-def get_standard_force_plot(explainer, shap_idx, feature_idx,
+def get_standard_force_plot(explainer, shap_idx, feature_idx, y_test, y_hat, prob,
                         outcome='In-hospital Death', fusion_type=None, 
                         subject_idx: int=0, risk_quantile: int=10,
                         modality='static', feature_names=None,
@@ -143,13 +143,57 @@ def get_standard_force_plot(explainer, shap_idx, feature_idx,
     """
     Generate a SHAP force plot.
     """
+    if verbose:
+        print(f"Generating Force plot ({modality}) for Subject {subject_idx} in Risk Quantile {risk_quantile}...")
+    
+    y_test = 'Y' if y_test else 'N'
+    y_hat = 'Y' if y_hat else 'N'
     plt.figure()
     shap.plots.force(
         explainer.expected_value, shap_idx, feature_idx, feature_names=feature_names,
         matplotlib=True, figsize=figsize, show=False
     )
     plt.title(f'SHAP Force Plot For Subject {subject_idx} in Risk Quantile {risk_quantile}: {outcome}, {fusion_type}({modality}).')
+    plt.suptitle(f"Truth: {y_test}, Predict: {y_hat}, Prob: {round(prob, 2)*100}%")
     plt.savefig(save_path, bbox_inches='tight', dpi=300)
     plt.close()
     if verbose:
         print(f"Force plot saved to {save_path}")
+
+def get_shap_text_plot(explainer, shap_values, text_data, y_test, y_hat, prob,
+                       outcome='In-hospital Death', fusion_type=None, 
+                       subject_idx: int=0, risk_quantile: int=10,
+                       save_path=None, verbose=True):
+    """
+    Generate a SHAP text plot for the notes modality.
+
+    Parameters:
+    - explainer: The SHAP explainer object.
+    - shap_values: The calculated SHAP values for the text data.
+    - text_data: The input text data for which SHAP values are calculated.
+    - outcome: The outcome being explained (default: 'In-hospital Death').
+    - fusion_type: The fusion method used in the model (default: None).
+    - subject_idx: The index of the subject being explained.
+    - risk_quantile: The risk quantile of the subject.
+    - save_path: Path to save the SHAP text plot.
+    - verbose: Whether to print additional information (default: True).
+
+    Returns:
+    - None: Saves the SHAP text plot to the specified path.
+    """
+    if verbose:
+        print(f"Generating SHAP text plot for Subject {subject_idx} in Risk Quantile {risk_quantile}...")
+    y_test = 'Y' if y_test else 'N'
+    y_hat = 'Y' if y_hat else 'N'
+    # Generate the SHAP text plot
+    plt.figure()
+    shap.plots.text(
+        explainer.expected_value, shap_values, text_data, show=False
+    )
+    plt.title(f'SHAP Text Plot For Subject {subject_idx} in Risk Quantile {risk_quantile}: {outcome}, {fusion_type}(notes).')
+    plt.suptitle(f"Truth: {y_test}, Predict: {y_hat}, Prob: {round(prob, 2)*100}%")
+    plt.savefig(save_path, bbox_inches='tight', dpi=300)
+    plt.close()
+
+    if verbose:
+        print(f"Text plot saved to {save_path}")

@@ -251,6 +251,14 @@ if __name__ == "__main__":
     ### Load model
     model = MMModel.load_from_checkpoint(checkpoint_path=model_path)
     batch = next(iter(test_dataloader))
+    print("Getting test data predictions...")
+    trainer = Trainer(accelerator="gpu")
+    output = trainer.predict(model, dataloaders=test_dataloader)
+    default_thresh = 0.5
+    prob = np.array(concat([out[0] for out in output])).flatten().astype(np.float32)
+    y_hat = np.where(prob > default_thresh, 1, 0)
+    y_test = np.array(concat([out[1] for out in output])).flatten().astype(np.int8)
+    ### SHAP setup
     ### Collect feature explanations
     if args.exp_mode == "global":
         shap_dict = {}
@@ -342,14 +350,20 @@ if __name__ == "__main__":
         risk_idx = pd.DataFrame(risk_dict)
         risk_idx = risk_idx[risk_dict['risk_quantile'] == args.local_risk_group].sample(args.local_samples, random_state=0).index.tolist()
         for i, subject in enumerate(risk_idx):
+            ## Get local-level predictions
+            y_test_subj = y_test[subject]
+            y_hat_subj = y_hat[subject]
+            prob_subj = prob[subject]
+            ## Get SHAP values for each modality
             for modality in modalities:
                 if modality == "static":
                     feature_names = test_set.get_feature_list()
-                    x_test = batch[0][subject].cpu().numpy()
-                    emb = model.embed_static(x_test)
+                    x_test = batch[0][subject]
+                    emb = model.embed_static(x_test).cpu().numpy()
                     explainer = shap.DeepExplainer(emb, x_test)
                     shap_values = explainer.shap_values(x_test)
                     get_standard_force_plot(explainer, shap_values, x_test,
+                                            y_test=y_test_subj, y_hat=y_hat_subj, prob=prob_subj,
                                             outcome=outcomes_disp[outcome_idx],
                                             fusion_type=fusion_method, subject_idx=i+1,
                                             risk_quantile=args.local_risk_group,
@@ -358,11 +372,18 @@ if __name__ == "__main__":
                                             verbose=args.verbose)
                 elif modality == "timeseries":
                     feature_names = test_set.get_feature_list()
-                    x_test = batch[2][subject].cpu().numpy()
-                    emb = model.embed_timeseries(x_test)
+                    x_test_vit = batch[2][1][subject]
+                    x_test_lab = batch[2][0][subject]
+                    emb_vit = model.embed_timeseries[1](x_test)
+                    emb_lab = model.embed_timeseries[0](x_test)
+                    emb = concat([emb_vit, emb_lab], dim=1).cpu().numpy()
+                    x_test = concat([x_test_vit, x_test_lab], dim=1).cpu().numpy()
+                    ### If using timeseries, plot summary over a single timepoint (t=0)
+                    x_test = feat_concat[:, 0, :]
                     explainer = shap.DeepExplainer(emb, x_test)
                     shap_values = explainer.shap_values(x_test)
                     get_standard_force_plot(explainer, shap_values, x_test,
+                                            y_test=y_test_subj, y_hat=y_hat_subj, prob=prob_subj,
                                             outcome=outcomes_disp[outcome_idx],
                                             fusion_type=fusion_method, subject_idx=i+1,
                                             risk_quantile=args.local_risk_group,
@@ -370,7 +391,29 @@ if __name__ == "__main__":
                                             save_path=os.path.join(exp_path, f"shap_local_{modality}_rg_{args.local_risk_group}_subj_{i+1}.png"),
                                             verbose=args.verbose)
                     
-        
+                elif modality == "notes":
+                    feature_names = get_feature_names(test_set, modality_type="notes")
+                    x_test = batch[4]
+                    emb = model.embed_notes(x_test).cpu().numpy()
+                    explainer = shap.DeepExplainer(emb, x_test)
+                    y_test_subj = y_test[subject]
+                    y_hat_subj = y_hat[subject]
+                    prob_subj = prob[subject]
+                    # Generate SHAP text plot
+                    get_shap_text_plot(
+                        explainer=explainer,
+                        shap_values=shap_scores,
+                        text_data=x_test,
+                        y_test=y_test_subj,
+                        y_hat=y_hat_subj,
+                        prob=prob_subj,
+                        outcome=outcomes_disp[outcome_idx],
+                        fusion_type=fusion_method,
+                        subject_idx=1,  # Example subject index
+                        risk_quantile=args.local_risk_group,
+                        save_path=os.path.join(exp_path, f"shap_local_{modality}_rg_{args.local_risk_group}_subj_{i+1}.png"),
+                        verbose=args.verbose
+                    )
 
         # Get model predictions
         y_test = batch[0][:, outcome_idx].cpu().numpy()
@@ -393,70 +436,3 @@ if __name__ == "__main__":
                 max_display=20,
             )
             plt.show()
-
-
-    '''
-    if model_type == "rf":
-            # Visualise important features
-            features = test_set.get_feature_list()
-            importances = model.feature_importances_
-            indices = np.argsort(importances)
-
-            plt.figure(figsize=(20, 10))
-            plt.title("Feature Importances")
-            plt.barh(
-                range(len(indices)), importances[indices], color="b", align="center"
-            )
-            plt.yticks(range(len(indices)), [features[i] for i in indices])
-            plt.xlabel("Relative Importance")
-            plt.show()
-
-            # Create shap plot
-            explainer = shap.TreeExplainer(model, x_test)
-
-            # Plot single waterfall plot
-            # Correct classification (TP)
-            tps = np.argwhere(np.logical_and(y_hat == 1, y_test == 1))
-
-            if len(tps) > 0:
-                tp = tps[0][0]
-
-                plt.figure(figsize=(12, 4))
-                plt.title(
-                    f"Truth: {int(y_test[tp])}, Predict: {int(y_hat[tp])}, Prob: {round(prob[tp], 2)}"
-                )
-                shap.bar_plot(
-                    explainer(x_test[tp])[:, 1].values,
-                    feature_names=features,
-                    max_display=20,
-                )
-                plt.show()
-
-            # Incorrect (FN)
-            fns = np.argwhere(np.logical_and(y_hat == 0, y_test == 1))
-
-            if len(fns) > 0:
-                fn = fns[0][0]
-
-                plt.figure(figsize=(12, 4))
-                plt.title(
-                    f"Truth: {int(y_test[fn])}, Predict: {int(y_hat[fn])}, Prob: {round(prob[fn], 2)}"
-                )
-                shap.bar_plot(
-                    explainer(x_test[fn])[:, 1].values,
-                    feature_names=features,
-                    max_display=20,
-                )
-                plt.show()
-
-            # Plot summary over all test subjects
-            start = time.time()
-            shap_values = explainer(x_test, check_additivity=False)
-            print(time.time() - start)
-
-            plt.figure()
-            shap.summary_plot(
-                shap_values[:, :, 1], feature_names=features, max_display=20
-            )
-            plt.show()
-    '''
