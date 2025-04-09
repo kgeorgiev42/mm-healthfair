@@ -1,8 +1,14 @@
 import os
+from lightning.pytorch import Trainer
 import shap
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import torch
+from torch.utils.data import DataLoader
+import torch.nn as nn
+from torch import concat
+from datasets import CollateFn, CollateTimeSeries, MIMIC4Dataset
 
 def get_feature_names(test_set, modality_type='tabular'):
     """
@@ -25,42 +31,44 @@ def get_feature_names(test_set, modality_type='tabular'):
         feature_names = test_set.get_feature_list(f"notes")['sentence']
     return feature_names
 
-def get_shap_values(model, batch,
-                    modality_type='tabular'):
+def get_shap_values(model, dataloader, device=None, bg_size=500):
     """
-    Calculate SHAP values for a given model and data batch while inferring feature names.
-
-    Parameters:
-    - model: The trained model for which to calculate SHAP values.
-    - X: The input data (features) for which to calculate SHAP values.
-    - feature_names: List of feature names (optional).
-    - modality_type: Type of data ('tabular', 'ts-vitals', 'ts-labs' or 'notes').
-
-    Returns:
-    - shap_values: The calculated SHAP values.
+    Calculate SHAP values for a given model and data batch using DeepExplainer.
     """
-    if modality_type == 'tabular':
-        x_test = batch[0]
-        emb = model.embed_static(x_test)
-    elif modality_type == 'ts-vitals':
-        x_test = batch[2][1]
-        emb = model.embed_timeseries[1](x_test)
-    elif modality_type == 'ts-labs':
-        x_test = batch[2][0]
-        emb = model.embed_timeseries[0](x_test)
-    elif modality_type == 'notes':
-        x_test = batch[4]
-        emb = model.embed_notes(x_test)
-    # Use DeepExplainer for other models
-    explainer = shap.DeepExplainer(emb, x_test)
-    if modality_type == 'tabular':
-        shap_values = explainer.shap_values(x_test)
-    else:
-        shap_values = explainer.shap_values(x_test, check_additivity=False)
+    # Move the model to the specified device
+    model = model.to(device)
 
-    return shap_values, x_test
+    # Wrap the model to output a scalar (e.g., probability of the positive class)
+    class ScalarOutputModel(torch.nn.Module):
+        def __init__(self, base_model):
+            super().__init__()
+            self.base_model = base_model
 
-def get_shap_summary_plot(shap_values, features, feature_names, outcome='In-hospital Death',
+        def forward(self, batch):
+            # Move batch to the same device as the model
+            batch = [b.to(device) if isinstance(b, torch.Tensor) else b for b in batch]
+            logits, _ = self.base_model.prepare_batch(batch)
+            probs = torch.sigmoid(logits)  # Convert logits to probabilities
+            return probs.squeeze(-1)  # Ensure scalar output for each sample
+
+    scalar_output_model = ScalarOutputModel(model)
+
+    # Get a batch of data from the DataLoader
+    batch = next(iter(dataloader))
+    batch = [b.to(device) if isinstance(b, torch.Tensor) else b for b in batch]  # Move batch to the correct device
+
+    # Use a subset of the data as the background dataset
+    background = batch[0][:bg_size]  # Assuming the first element is the input data
+
+    # Initialize DeepExplainer
+    explainer = shap.DeepExplainer(scalar_output_model, background)
+
+    # Calculate SHAP values
+    shap_values = explainer.shap_values(batch[0])  # Pass only the input data
+
+    return shap_values
+
+def get_shap_summary_plot(shap_values, feature_names, outcome='In-hospital Death',
                           fusion_type=None, modality=None, max_features=20,
                           figsize=(8, 5), save_path=None):
     """
@@ -75,8 +83,9 @@ def get_shap_summary_plot(shap_values, features, feature_names, outcome='In-hosp
     - None: Displays the SHAP summary plot.
     """
     plt.figure()
-    shap.summary_plot(shap_values, features, feature_names=feature_names, figsize=figsize,
-                      plot_type='violin', max_display=max_features, figsize=(8, 5), show=False)
+    print(shap_values.shape, feature_names)
+    shap.summary_plot(shap_values, feature_names=feature_names, plot_size=figsize,
+                      plot_type='violin', max_display=max_features, show=False)
     plt.title(f'SHAP Global Importance: {outcome}, {fusion_type}({modality}).')
     plt.savefig(save_path, bbox_inches='tight', dpi=300)
     plt.close()

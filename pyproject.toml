@@ -20,7 +20,7 @@ ruff = "^0.3.5"
 polars = "^0.20.23"
 wandb = "^0.17.0"
 shap = "^0.47.1"
-fairlearn = "^0.10.0"
+fairlearn = "^0.12.0"
 transformers = "^4.42.1"
 en-core-sci-md = {url = "https://s3-us-west-2.amazonaws.com/ai2-s2-scispacy/releases/v0.5.4/en_core_sci_md-0.5.4.tar.gz"}
 spacy = "3.7.5"

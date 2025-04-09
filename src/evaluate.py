@@ -190,12 +190,12 @@ if __name__ == "__main__":
         print(f"No test ids found for outcome {args.outcome}. Exiting..")
         sys.exit()
 
-    if (len(model_path) == 0) and (args.group_models == False):
-        print(f"No model found at {args.model_path}. Exiting..")
+    if (len(glob.glob(model_path)) == 0) and (args.group_models == False):
+        print(f"No model found at {model_path}. Exiting..")
         sys.exit()
 
-    if (len(loss_path) == 0) and (args.group_models == False):
-        print(f"No losses.csv found at {args.model_path}. Exiting..")
+    if (len(glob.glob(loss_path)) == 0) and (args.group_models == False):
+        print(f"No losses.csv found at {model_path}. Exiting..")
         sys.exit()
 
     test_ids = pl.read_csv(os.path.join(args.ids_path, "testing_ids_" + args.outcome + ".csv")).select("subject_id").to_numpy().flatten()
@@ -273,6 +273,7 @@ if __name__ == "__main__":
     ### Record ground-truths and probabilities
     res_dict["y_test"] = y_test
     res_dict["y_prob"] = prob
+    res_dict["test_ids"] = test_ids
     save_pickle(res_dict, eval_path, f"pf_{args.model_path}.pkl")
     print(f"Saved results dictionary to {eval_path}/pf_{args.model_path}.pkl")
     print('Evaluation complete.')

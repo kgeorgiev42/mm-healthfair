@@ -181,6 +181,7 @@ def get_roc_performance(y_test: np.array, prob: np.array,
     res_dict_roc['roc_auc'] = aucss
     res_dict_roc['roc_upper'] = ci[1]
     res_dict_roc['roc_lower'] = ci[0]
+    res_dict_roc['yd_idx'] = yd
     #res_dict_roc['fpr'] = fpr
     #res_dict_roc['tpr'] = tpr
     return bin_labels, res_dict_roc
@@ -193,6 +194,7 @@ def get_pr_performance(y_test: np.array, prob: np.array,
     res_dict_pr = {}
     ### Get F1 score
     f1 = f1_score(y_test, bin_labels)
+    thres = 0.5
     auc_score = auc(recall, precision)
     if opt_f1:
         thres = optimal_threshold(prob)
@@ -241,6 +243,7 @@ def get_pr_performance(y_test: np.array, prob: np.array,
     res_dict_pr['prec'] = prec_s
     res_dict_pr['recall'] = recall_s
     res_dict_pr['prevalence'] = np.sum(y_test) / len(y_test)
+    res_dict_pr['f1_thres'] = thres
     return res_dict_pr 
 
 def get_all_roc_pr_summary(res_dicts: list,
