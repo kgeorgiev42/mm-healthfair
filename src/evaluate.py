@@ -164,7 +164,7 @@ if __name__ == "__main__":
     print("MMHealthFair: Multimodal evaluation pipeline")
     ### If --group_models, load results dictionary and generate summary
     if args.group_models:
-        print("Generating Precision-Recall summary across all outcomes...")
+        print("Generating Precision-Recall summary across all selected models...")
         res_all = []
         for model, path in zip(model_names, model_paths):
             r_path = os.path.join(os.path.join(args.eval_path, path), "pf_" + path + ".pkl")
@@ -172,8 +172,8 @@ if __name__ == "__main__":
             res_all.append(res_dict)
 
         get_all_roc_pr_summary(res_all, model_names, model_colors,
-                            output_roc_path=f"{args.eval_path}/roc_full_{path}.png",
-                            output_pr_path=f"{args.eval_path}/pr_full_{path}.png")
+                            output_roc_path=f"{args.eval_path}/roc_full_across_models.png",
+                            output_pr_path=f"{args.eval_path}/pr_full_across_models.png")
         print("Evaluation complete.")
         sys.exit()
     print(f'Evaluating performance for outcome "{outcomes_disp[outcome_idx]}"')

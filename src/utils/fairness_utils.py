@@ -1,4 +1,5 @@
 import matplotlib.pyplot as plt
+import matplotlib.ticker as mtick
 import numpy as np
 import polars as pl
 from functools import partial
@@ -18,14 +19,17 @@ def plot_bar_metric_frame(
     metrics: dict,
     y_test: np.ndarray,
     y_hat: np.ndarray,
-    ehr_static: pl.DataFrame,
-    title: str,
+    attr_df: pl.DataFrame,
+    attribute: str,
     save_path: str,
-    figsize=(10, 6),
-    fontsize=14,
+    figsize=[12, 8],
+    n_boot=1000,
+    nrows=2,
+    ncols=2,
+    seed=0,
 ):
     """
-    Plot a bar chart for the given metric frame.
+    Plot an error bar chart for the given metric frame.
 
     Args:
         metric_frame (MetricFrame): The metric frame to plot.
@@ -41,26 +45,34 @@ def plot_bar_metric_frame(
         metrics=metrics,
         y_true=y_test,
         y_pred=y_hat,
-        sensitive_features=ehr_static,
+        sensitive_features=attr_df,
+        random_state=seed
     )
 
-    metric_frame.by_group.plot.bar(
+    plt.figure(figsize=figsize)
+    fig = metric_frame.by_group.plot.bar(
         subplots=True,
-        layout=[3, 2],
+        layout=[nrows, ncols],
         colormap="Pastel2",
         legend=False,
-        figsize=[8, 6],
-        title="Fairness evaluation",
-        xlabel="Attribute",
+        figsize=figsize,
+        title=f"Error estimates by {attribute}",
     )
-    # Create a bar plot for the metric frame
-    metric_frame.plot.bar(figsize=figsize, fontsize=fontsize)
-    plt.title(title, fontsize=fontsize)
-    plt.xlabel("Group", fontsize=fontsize)
-    plt.ylabel("Metric Value", fontsize=fontsize)
-    plt.xticks(rotation=45, ha="right")
+
+    axes = fig.flatten()
+    for i in range(len(axes)):
+        plt.sca(axes[i])
+        plt.xticks(rotation=45, ha="center")
+        plt.xlabel("")
+        if i < len(axes) - 1:
+            axes[i].set_ylim(0.0, 1.0)
+            axes[i].yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f'{x*100:.0f}%'))
+
+    fig = plt.gcf()
     plt.tight_layout()
-    plt.savefig(save_path)
+    #plt.savefig(save_path)
+    fig.savefig(save_path)
+    print(f"Error plot saved to {save_path}.")
 
 # Extract bias-corrected confidence intervals using BCa method (example of effects and variations: https://www.erikdrysdale.com/bca_python/)
 def bias_corrected_ci(bootstrap_samples, observed_value):
@@ -85,7 +97,9 @@ def get_bootstrapped_fairness_measures(y_test: np.ndarray,
                                        attr_pf: pl.DataFrame,
                                        n_boot: int = 1000,
                                        seed: int = 0,
-                                       verbose: bool = False) -> tuple:
+                                       skip_ci: bool = False,
+                                       verbose: bool = False,
+                                       ) -> tuple:
     global_metrics = {
         "Demographic Parity": demographic_parity_ratio,
         "Equalized Odds": equalized_odds_ratio,
@@ -94,9 +108,7 @@ def get_bootstrapped_fairness_measures(y_test: np.ndarray,
     # Initialize random state
     rng = np.random.default_rng(seed)
     if verbose:
-        print(attr_pf.to_pandas().value_counts(normalize=True))
-    if 'race_group' in attr_pf.columns:
-        attr_pf = attr_pf.filter(pl.col('race_group')!='Other')
+        print(attr_pf.to_pandas().value_counts())
     # Store bootstrap results
     bootstrap_results = {metric: [] for metric in global_metrics}
     # Perform bootstrapping (random sampling with stratification)
@@ -109,7 +121,6 @@ def get_bootstrapped_fairness_measures(y_test: np.ndarray,
                 rng.choice(group_indices, size=len(group_indices), replace=True)
             )
         stratified_indices = np.array(stratified_indices)
-
         y_test_sample = y_test[stratified_indices]
         y_hat_sample = y_hat[stratified_indices]
         attr_pf_sample = attr_pf[stratified_indices, :]
@@ -128,16 +139,157 @@ def get_bootstrapped_fairness_measures(y_test: np.ndarray,
         bootstrap_results["Equal Opportunity"].append(eop_boot)
 
     # Calculate overall metrics from bootstrap results (under imbalance assumption)
-    dpr = np.median(bootstrap_results["Demographic Parity"])
-    eor = np.median(bootstrap_results["Equalized Odds"])
-    eop = np.median(bootstrap_results["Equal Opportunity"])
+    dpr = np.mean(bootstrap_results["Demographic Parity"])
+    eor = np.mean(bootstrap_results["Equalized Odds"])
+    eop = np.mean(bootstrap_results["Equal Opportunity"])
+    dp_ci = eor_ci = eop_ci = (0, 0)
 
-    dp_ci = bias_corrected_ci(bootstrap_results["Demographic Parity"], dpr)
-    eor_ci = bias_corrected_ci(bootstrap_results["Equalized Odds"], eor)
-    eop_ci = bias_corrected_ci(bootstrap_results["Equal Opportunity"], eop)
+    # Skip CI calculation if using risk quantiles
+    if not skip_ci:
+        dp_ci = bias_corrected_ci(bootstrap_results["Demographic Parity"], dpr)
+        eor_ci = bias_corrected_ci(bootstrap_results["Equalized Odds"], eor)
+        eop_ci = bias_corrected_ci(bootstrap_results["Equal Opportunity"], eop)
 
     dpr_full = (dpr, dp_ci[0], dp_ci[1])
     eor_full = (eor, eor_ci[0], eor_ci[1])
     eop_full = (eop, eop_ci[0], eop_ci[1])
 
     return dpr_full, eor_full, eop_full
+
+def plot_fairness_by_age(aq_dict: dict,
+                         age_labels: list,
+                         out_path: str,
+                         attributes: list,
+                         attribute_labels: list,
+                         figsize: tuple = (11, 8),
+                         measure: str = "DPR",
+                         measure_label: str = "Demographic Parity",
+                         ):
+    """
+    Plot fairness measures by age group for sex, ethnicity, insurance, and marital status.
+
+    Args:
+        aq_dict (dict): Dictionary containing fairness metrics by age group.
+        age_labels (list): List of age group labels.
+        out_path (str): Path to save the plot.
+        figsize (tuple): Size of the figure.
+
+    Returns:
+        None
+    """
+    # Define attributes and their labels
+    attributes = ["gender", "race_group", "insurance", "marital_status"]
+    attribute_labels = ["Sex", "Ethnicity", "Insurance", "Marital Status"]
+
+    # Define unique colors for each age group
+    colors = plt.cm.viridis(np.linspace(0, 1, len(age_labels)))
+
+    # Create subplots
+    fig, axes = plt.subplots(2, 2, figsize=figsize, sharex=True, sharey=True)
+    # Set suptitle
+    fig.suptitle(f"{measure_label} by age and sensitive group.", fontsize=22)
+    #fig.supxlabel("Age Group", fontsize=20, x=0.55)
+    fig.supylabel(measure_label, fontsize=20)
+    axes = axes.flatten()
+
+    # Plot DPR for each attribute
+    for i, (attr, label) in enumerate(zip(attributes, attribute_labels)):
+        # Filter keys for the current attribute
+        attr_keys = {key: value for key, value in aq_dict.items() if attr in key}
+        m_values = [attr_keys[f"{attr}_aq_{age}"][measure] for age in age_labels]
+        m_counts = [aq_dict[f"{attr}_aq_{age}"]["Size"] for age in age_labels]
+
+        # Plot on the corresponding subplot
+        for j, age in enumerate(age_labels):
+            axes[i].plot(age, m_values[j], marker="o", color=colors[j], label=f"Age {age}, N={m_counts[j]}")
+
+        axes[i].set_title(f"{label}", fontsize=20)
+        #axes[i].set_xlabel("Age Group")
+        #axes[i].set_ylabel(measure_label)
+        axes[i].set_ylim(-0.05, 1)
+        axes[i].grid(True)
+        axes[i].yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f'{x*100:.0f}%'))
+        if i == 1:
+            axes[i].legend(title="Age Group", loc="upper left", bbox_to_anchor=(1, 1), fontsize=14) 
+        else:
+            axes[i].legend().set_visible(False)
+
+    # Adjust layout and save the plot
+    plt.tight_layout()
+    plt.savefig(out_path)
+    print(f"Fairness plot saved to {out_path}")
+    plt.close()
+
+def get_fairness_summary(res_all: dict,
+                         models: list,
+                         colors: list = [],
+                         attribute_labels: list = [],
+                         figsize: tuple = (13, 8),
+                         nrows: int=2,
+                         ncols: int=2,
+                         outcome: str = "Extended Stay",
+                         output_path: str = "fair_full_across_models.png"):
+    """
+    Plot grouped barplots for fairness metrics (DPR, EQO, EOP) with 95% CI for each model.
+
+    Args:
+        res_all (dict): Dictionary containing fairness metrics for each model.
+        models (list): List of model names.
+        colors (list): List of colors for each model.
+        output_path (str): Path to save the plot.
+
+    Returns:
+        None
+    """
+    # Define attributes and their labels
+    attributes = ["fair_"+item for item in attribute_labels]
+
+    # Define metrics and their labels
+    metrics = ["DPR", "EQO", "EOP"]
+    #metric_labels = ["Demographic Parity", "Equalized Odds", "Equal Opportunity"]
+
+    # Set default colors if not provided
+    if not colors:
+        colors = plt.cm.tab10(np.linspace(0, 1, len(models)))
+
+    # Create subplots
+    fig, axes = plt.subplots(nrows, ncols, figsize=figsize, sharey=True)
+    axes = axes.flatten()
+
+    # Iterate over attributes and plot each subplot
+    for i, (attr, label) in enumerate(zip(attributes, attribute_labels)):
+        ax = axes[i]
+        x = np.arange(len(metrics))  # Positions for metrics
+        width = 0.2  # Width of each bar
+
+        # Plot bars for each model
+        for j, model in enumerate(models):
+            metric_values = [res_all[model][attr][metric] for metric in metrics]
+            ci_values = [res_all[model][attr][f"{metric}_CI"] for metric in metrics]
+            lower_bounds = [metric - ci[0] for metric, ci in zip(metric_values, ci_values)]
+            upper_bounds = [ci[1] - metric for metric, ci in zip(metric_values, ci_values)]
+
+            # Plot bars with error bars
+            ax.bar(x + j * width, metric_values, width, label=model, color=colors[j],
+                   yerr=[lower_bounds, upper_bounds], capsize=5, alpha=0.8)
+
+        # Set subplot title and labels
+        ax.set_title(label, fontsize=17)
+        ax.set_xticks(x + width * (len(models) - 1) / 2)
+        ax.set_xticklabels(metrics, fontsize=17)
+        ax.set_ylim(-0.05, 1.1)
+        ax.grid(axis="y", linestyle="--", alpha=0.7)
+        ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f'{x*100:.0f}%'))
+
+        # Add legend to the second subplot
+        if i == 1:
+            ax.legend(title="Model", loc="upper left", bbox_to_anchor=(1, 1), fontsize=16)
+
+    # Adjust layout and save the plot
+    fig.suptitle(f"Fairness Estimates For {outcome} Prediction", fontsize=19)
+    fig.supxlabel("Fairness Type", fontsize=19)
+    fig.supylabel("Estimate", fontsize=19)
+    plt.tight_layout()  # Adjust layout to fit legend
+    plt.savefig(output_path)
+    print(f"Global fairness summary saved to {output_path}")
+    plt.close()
