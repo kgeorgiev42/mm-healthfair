@@ -1,8 +1,6 @@
 import argparse
 
-import polars as pl
 import torch
-from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data import Dataset
 from utils.functions import load_pickle, preview_data
 
@@ -31,11 +29,11 @@ class CollateTimeSeries:
         if len(batch[0]) > 3:  # noqa: PLR2004
             # pad notes to max length in batch
             notes = torch.stack([data[3] for data in batch])
-            #notes = pad_sequence([data[3] for data in batch], batch_first=True)
+            # notes = pad_sequence([data[3] for data in batch], batch_first=True)
 
         # number of dynamic timeseries data (note: dynamic is a list of timeseries)
         n_ts = len(batch[0][2])
-        #print("Number of timeseries", n_ts)
+        # print("Number of timeseries", n_ts)
 
         if self.method == "pack_pad":
             dynamic = []
@@ -43,9 +41,9 @@ class CollateTimeSeries:
             for ts in range(n_ts):
                 # Function to pad batch-wise due to timeseries of different lengths
                 timeseries_lengths = [data[2][ts].shape[0] for data in batch]
-                #print("Timeseries lengths", timeseries_lengths)
+                # print("Timeseries lengths", timeseries_lengths)
                 max_events = max(timeseries_lengths)
-                #print("Max events", max_events)
+                # print("Max events", max_events)
                 n_ftrs = batch[0][2][ts].shape[1]
                 events = torch.zeros((len(batch), max_events, n_ftrs))
                 for i in range(len(batch)):
@@ -94,14 +92,16 @@ class MIMIC4Dataset(Dataset):
         ids=None,
         static_only=False,
         with_notes=False,
-        outcome="in_hosp_death"
+        outcome="in_hosp_death",
     ) -> None:
         super().__init__()
 
         self.data_dict = load_pickle(data_path)
         self.col_dict = load_pickle(col_path)
         self.id_list = list(self.data_dict.keys()) if ids is None else ids
-        self.dynamic_keys = sorted([key for key in self.data_dict[self.id_list[0]].keys() if "dynamic" in key])
+        self.dynamic_keys = sorted(
+            [key for key in self.data_dict[self.id_list[0]].keys() if "dynamic" in key]
+        )
         self.split = split
         self.static_only = static_only
         self.with_notes = with_notes
@@ -128,9 +128,7 @@ class MIMIC4Dataset(Dataset):
             return static, label
 
         else:
-            dynamic = [
-                self.data_dict[pt_id][i] for i in self.dynamic_keys
-            ]
+            dynamic = [self.data_dict[pt_id][i] for i in self.dynamic_keys]
             dynamic = [torch.tensor(x, dtype=torch.float32) for x in dynamic]
             if self.with_notes:
                 notes = self.data_dict[pt_id]["notes"]  # 1 x 768
@@ -152,15 +150,19 @@ class MIMIC4Dataset(Dataset):
         else:
             id_list = self.splits[self.split]
 
-        n_positive = len([id_list[i] for i in range(len(id_list)) if self.data_dict[id_list[i]][self.outcome][0][0] == 1])
+        n_positive = len(
+            [
+                id_list[i]
+                for i in range(len(id_list))
+                if self.data_dict[id_list[i]][self.outcome][0][0] == 1
+            ]
+        )
 
         if self.split is not None:
             print(f"{self.split.upper()}:")
 
         print(f"Positive cases: {n_positive}")
-        print(
-            f"Negative cases: {self.id_list.shape[0] - n_positive}"
-        )
+        print(f"Negative cases: {self.id_list.shape[0] - n_positive}")
 
     def get_feature_dim(self, key="static"):
         return self.data_dict[int(self.id_list[0])][key].shape[1]
@@ -170,6 +172,7 @@ class MIMIC4Dataset(Dataset):
 
     def get_split_ids(self, split):
         return self.splits[split]
+
 
 if __name__ == "__main__":
     # Preview data from a saved pkl file

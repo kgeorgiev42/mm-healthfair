@@ -1,12 +1,13 @@
-import os
 import csv
+import os
+
 import lightning as L
 import torch
 import torch.nn.functional as F
 import torchmetrics
+from lightning.pytorch.callbacks import Callback
 from torch import nn
 from torch.optim.lr_scheduler import ReduceLROnPlateau
-from lightning.pytorch.callbacks import Callback
 
 
 # nn.Modules
@@ -71,34 +72,36 @@ class MMModel(L.LightningModule):
         lr=0.1,
         fusion_method="concat",
         st_first=True,
-        modalities=["static", "timeseries", "notes"],
+        modalities=None,
         with_packed_sequences=False,
-        dataset=None
+        dataset=None,
     ):
         super().__init__()
         self.save_hyperparameters()
-        self.num_ts = num_ts
-        self.modalities = modalities
-        self.st_first = st_first
-        self.with_ts = True if "timeseries" in modalities else False
-        self.with_notes = True if "notes" in modalities else False
-        self.with_static = True if "static" in modalities else False
+        self.modalities = set(modalities)
+        self.with_static = "static" in self.modalities
+        self.with_ts = "timeseries" in self.modalities
+        self.with_notes = "notes" in self.modalities
         self.fusion_method = fusion_method
+        self.st_first = st_first
 
-        if self.with_static:
-            self.embed_static = nn.Sequential(
+        # Static embedding
+        self.embed_static = (
+            nn.Sequential(
                 nn.Linear(st_input_dim, st_embed_dim // 2),
                 nn.LayerNorm(st_embed_dim // 2),
                 nn.Linear(st_embed_dim // 2, st_embed_dim),
                 nn.Dropout(dropout),
                 nn.ReLU(),
             )
-        else:
-            self.embed_static = None
-            st_embed_dim = 0
+            if self.with_static
+            else None
+        )
+        st_embed_dim = st_embed_dim if self.with_static else 0
 
-        if self.with_ts:
-            self.embed_timeseries = nn.ModuleList(
+        # Time-series embedding
+        self.embed_timeseries = (
+            nn.ModuleList(
                 [
                     LSTM(
                         ts_input_dim[i],
@@ -106,15 +109,17 @@ class MMModel(L.LightningModule):
                         num_layers=num_layers,
                         dropout=dropout,
                     )
-                    for i in range(self.num_ts)
+                    for i in range(num_ts)
                 ]
             )
-        else:
-            self.embed_timeseries = None
-            ts_embed_dim = 0
+            if self.with_ts
+            else None
+        )
+        ts_embed_dim = ts_embed_dim if self.with_ts else 0
 
-        if self.with_notes:
-            self.embed_notes = nn.Sequential(
+        # Notes embedding
+        self.embed_notes = (
+            nn.Sequential(
                 nn.Linear(nt_input_dim, nt_embed_dim),
                 nn.LayerNorm(nt_embed_dim),
                 nn.ReLU(),
@@ -131,125 +136,78 @@ class MMModel(L.LightningModule):
                 ),
                 nn.Dropout(dropout),
             )
+            if self.with_notes
+            else None
+        )
+        nt_embed_dim = nt_embed_dim if self.with_notes else 0
+
+        # Fusion and final layer
+        if fusion_method == "mag" and self.with_ts and self.with_static:
+            self.fuse = Gate(
+                st_embed_dim if st_first else ts_embed_dim,
+                *([ts_embed_dim] * num_ts if st_first else [st_embed_dim]),
+                dropout=dropout,
+            )
+            self.fc = nn.Linear(st_embed_dim if st_first else ts_embed_dim, target_size)
+        elif fusion_method == "concat":
+            total_dim = st_embed_dim + (num_ts * ts_embed_dim) + nt_embed_dim
+            self.fc = nn.Linear(total_dim, target_size)
         else:
-            self.embed_notes = None
-            nt_embed_dim = 0
-
-        if self.fusion_method == "mag" and self.with_ts and self.with_static:
-            if self.st_first:
-                self.fuse = Gate(
-                    st_embed_dim, *([ts_embed_dim] * self.num_ts), dropout=dropout
-                )
-                self.fc = nn.Linear(st_embed_dim, target_size)
-
-            else:
-                self.fuse = Gate(
-                    *([ts_embed_dim] * self.num_ts), st_embed_dim, dropout=dropout
-                )
-                self.fc = nn.Linear(ts_embed_dim, target_size)
-
-        elif self.fusion_method == "concat":
-            # embeddings must be same dim
-            if set(['static', 'timeseries']).issubset(modalities):
-                assert st_embed_dim == ts_embed_dim
-            if set(['static', 'notes']).issubset(modalities):
-                assert nt_embed_dim == st_embed_dim
-            if set(['timeseries', 'notes']).issubset(modalities):
-                assert ts_embed_dim == nt_embed_dim
-
-            if self.with_static and self.with_ts and self.with_notes:
-                self.fc = nn.Linear(
-                st_embed_dim + (self.num_ts * ts_embed_dim) + nt_embed_dim, target_size
-                )
-            elif self.with_static and self.with_ts:
-                self.fc = nn.Linear(st_embed_dim + (self.num_ts * ts_embed_dim), target_size)
-            elif self.with_static and self.with_notes:
-                self.fc = nn.Linear(st_embed_dim + nt_embed_dim, target_size)
-            elif self.with_ts and self.with_notes:
-                self.fc = nn.Linear((self.num_ts * ts_embed_dim) + nt_embed_dim, target_size)
-
-        elif self.fusion_method == "None" and self.with_static:
-            self.fc = nn.Linear(st_embed_dim, target_size)
-        elif self.fusion_method == "None" and self.with_ts:
-            self.fc = nn.Linear((self.num_ts * ts_embed_dim), target_size)
-        elif self.fusion_method == "None" and self.with_notes:
-            self.fc = nn.Linear(nt_embed_dim, target_size)
-
-        # Compute class weights if dataset is provided
-        pos_weight = self.compute_class_weights(dataset) if dataset else None
+            embed_dim = st_embed_dim or (num_ts * ts_embed_dim) or nt_embed_dim
+            self.fc = nn.Linear(embed_dim, target_size)
 
         # Loss function with class weights
+        pos_weight = self.compute_class_weights(dataset) if dataset else None
         self.criterion = torch.nn.BCEWithLogitsLoss(pos_weight=pos_weight)
+
+        # Metrics
         self.lr = lr
         self.acc = torchmetrics.Accuracy(task="binary")
         self.auc = torchmetrics.AUROC(task="binary")
         self.f1 = torchmetrics.F1Score(task="binary")
         self.ap = torchmetrics.AveragePrecision(task="binary")
-
         self.with_packed_sequences = with_packed_sequences
 
-    def prepare_batch(self, batch):  # noqa: PLR0912
-        # static, labels, dynamic, lengths, notes (optional) # noqa: E741
-        s = batch[0]
-        y = batch[1]
-
-        if self.with_static:
-            st_embed = self.embed_static(s)
-        else:
-            st_embed = None
-
-        if self.with_ts:
-            d = batch[2]
-            if self.with_packed_sequences:
-                lengths = batch[3]
-            #print('Packing padded sequences.')
-            ts_embed = []
-            for i in range(self.num_ts):
-                if self.with_packed_sequences:
-                    packed_d = torch.nn.utils.rnn.pack_padded_sequence(
+    def prepare_batch(self, batch):
+        s, y, d, lengths, n = batch[0], batch[1], batch[2], batch[3], batch[4]
+        st_embed = self.embed_static(s) if self.with_static else None
+        ts_embed = (
+            [
+                self.embed_timeseries[i](
+                    torch.nn.utils.rnn.pack_padded_sequence(
                         d[i], lengths[i], batch_first=True, enforce_sorted=False
                     )
-                    embed = self.embed_timeseries[i](packed_d)
-                else:
-                    embed = self.embed_timeseries[i](d[i])
+                    if self.with_packed_sequences
+                    else d[i]
+                ).unsqueeze(1)
+                for i in range(self.hparams.num_ts)
+            ]
+            if self.with_ts
+            else None
+        )
+        nt_embed = self.embed_notes(n) if self.with_notes else None
 
-                ts_embed.append(embed.unsqueeze(1))
-        else:
-            ts_embed = None
-
-        if self.with_notes:
-            n = batch[4]
-            nt_embed = self.embed_notes(n)
-        else:
-            nt_embed = None
-
-        # Fuse time-series, static and notes data
+        # Fuse embeddings
         if self.fusion_method == "concat":
-            # use * to allow variable number of ts_embeddings
-            # concat along feature dim
-            embeddings = [st_embed] if st_embed is not None else []
-            embeddings = embeddings + [*ts_embed] if ts_embed is not None else embeddings
-            embeddings = embeddings + [nt_embed] if nt_embed is not None else embeddings
-            out = torch.concat(embeddings, dim=-1).squeeze()  # b x dim*2
+            embeddings = [
+                e for e in [st_embed, *(ts_embed or []), nt_embed] if e is not None
+            ]
+            out = torch.concat(embeddings, dim=-1).squeeze()
         elif self.fusion_method == "mag" and self.with_ts:
-            if self.st_first:
-                out = self.fuse(st_embed, *ts_embed)  # b x st_embed_dim
-            else:
-                out = self.fuse(*ts_embed, st_embed)
-        elif self.fusion_method == "None":
-            # print('No fusion method specified. Using static data only.')
-            if st_embed is not None:
-                out = st_embed.squeeze()
-            elif ts_embed is not None:
-                out = torch.cat([t.squeeze() for t in ts_embed], dim=-1)
-            elif nt_embed is not None:
-                out = nt_embed.squeeze()
+            out = (
+                self.fuse(st_embed, *ts_embed)
+                if self.st_first
+                else self.fuse(*ts_embed, st_embed)
+            )
+        else:
+            out = (
+                st_embed
+                or torch.cat([t.squeeze() for t in ts_embed], dim=-1)
+                or nt_embed
+            ).squeeze()
 
-        # Parse through FC
-        x_hat = self.fc(out)  # b x 1 - logits
-        if len(x_hat.shape) < 2:  # noqa: PLR2004
-            x_hat = x_hat.unsqueeze(0)
-        return x_hat, y
+        x_hat = self.fc(out)
+        return x_hat.unsqueeze(0) if len(x_hat.shape) == 1 else x_hat, y
 
     def training_step(self, batch, batch_idx):
         # training_step defines the train loop.
@@ -324,9 +282,9 @@ class MMModel(L.LightningModule):
         return y_hat, y
 
     def configure_optimizers(self):
-        #optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr, weight_decay=1e-4)
+        # optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr, weight_decay=1e-4)
         optimizer = torch.optim.SGD(self.parameters(), lr=self.lr, weight_decay=1e-4)
-        #optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
+        # optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
         scheduler = ReduceLROnPlateau(optimizer, mode="min", patience=5)
         return [optimizer], [
             {"scheduler": scheduler, "monitor": "val_loss", "interval": "epoch"}
@@ -343,9 +301,13 @@ class MMModel(L.LightningModule):
             torch.Tensor: Class weights for the positive class.
         """
         labels = []
-        #print(dataset[0])
+        # print(dataset[0])
         for i in range(len(dataset)):  # Assuming dataset returns (data, label, ...)
-            labels.append(dataset[i][1].item() if isinstance(dataset[i][1], torch.Tensor) else dataset[i][1])
+            labels.append(
+                dataset[i][1].item()
+                if isinstance(dataset[i][1], torch.Tensor)
+                else dataset[i][1]
+            )
 
         total_samples = len(labels)
         positive_samples = sum(labels)
@@ -355,6 +317,7 @@ class MMModel(L.LightningModule):
         pos_weight = negative_samples / positive_samples
         print(f"Adjusting positive class weight to: {round(pos_weight, 3)}")
         return torch.tensor(pos_weight, dtype=torch.float32)
+
 
 class LitLSTM(L.LightningModule):
     """LSTM using time-series data only.
@@ -430,6 +393,7 @@ class LitLSTM(L.LightningModule):
         optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
         return optimizer
 
+
 class SaveLossesCallback(Callback):
     def __init__(self, log_dir="logs", save_every_n_epochs=5):
         """
@@ -465,10 +429,12 @@ class SaveLossesCallback(Callback):
             # Append the losses to the CSV file
             with open(self.csv_file, mode="a", newline="") as f:
                 writer = csv.writer(f)
-                writer.writerow([
-                    trainer.current_epoch + 1,
-                    train_loss.item() if train_loss is not None else None,
-                    val_loss.item() if val_loss is not None else None
-                ])
+                writer.writerow(
+                    [
+                        trainer.current_epoch + 1,
+                        train_loss.item() if train_loss is not None else None,
+                        val_loss.item() if val_loss is not None else None,
+                    ]
+                )
 
             print(f"Saved losses to {self.csv_file}")

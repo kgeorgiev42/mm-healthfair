@@ -291,9 +291,9 @@ def read_diagnoses_table(
 
     # Get list of eligible hospital episodes as historical data
     adm_lkup = admissions_data.join(
-        adm_last.select(
-            ["subject_id", "edregtime"]
-        ).rename({"edregtime": "last_edregtime"}),
+        adm_last.select(["subject_id", "edregtime"]).rename(
+            {"edregtime": "last_edregtime"}
+        ),
         on="subject_id",
         how="left",
     )

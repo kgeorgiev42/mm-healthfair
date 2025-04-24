@@ -614,7 +614,7 @@ def clean_notes(notes: pl.DataFrame | pl.LazyFrame) -> pl.DataFrame | pl.LazyFra
         .str.replace_all(r"___", " ")
         .str.replace_all(r"\s+", " ")
     )
-    #notes = notes.with_columns(target=pl.col("target").str.replace_all(r"\s+", " "))
+    # notes = notes.with_columns(target=pl.col("target").str.replace_all(r"\s+", " "))
     return notes
 
 
@@ -676,7 +676,7 @@ def process_text_to_embeddings(notes: pl.DataFrame) -> dict:
             embeddings = np.zeros((768,))  # Handle case with no sentences
 
         # Map each sentence to its embedding
-        sentence_embedding_pairs = list(zip(sentences, embeddings))
+        sentence_embedding_pairs = list(zip(sentences, embeddings, strict=False))
 
         # Store the mapping in the dictionary
         embeddings_dict[subj_id] = sentence_embedding_pairs
@@ -877,11 +877,13 @@ def generate_interval_dataset(
             ehr_cur = ehr_cur.drop("subject_id").to_numpy()
             data_dict[id_val] = {"static": ehr_cur}
             for outcome in outcomes:
-                data_dict[id_val][outcome] = ehr_sel.select(outcome).cast(pl.Int8).to_numpy()
+                data_dict[id_val][outcome] = (
+                    ehr_sel.select(outcome).cast(pl.Int8).to_numpy()
+                )
             for _, ts in enumerate(ts_data_list):
                 key = "dynamic_0" if ts.columns == vitals_lkup else "dynamic_1"
                 if key == "dynamic_1" and "dynamic1_cols" not in col_dict.keys():
-                    col_dict['dynamic1_cols'] = ts.columns
+                    col_dict["dynamic1_cols"] = ts.columns
                 data_dict[id_val][key] = ts.to_numpy()
             n += 1
 
@@ -952,7 +954,12 @@ def _process_patient_events(
 
         ts_data_list.append(timeseries.select(feature_map[src]))
 
-    return write_data, ts_data_list, skipped_due_to_event_count, skipped_due_to_elapsed_time
+    return (
+        write_data,
+        ts_data_list,
+        skipped_due_to_event_count,
+        skipped_due_to_elapsed_time,
+    )
 
 
 def _validate_event_count(

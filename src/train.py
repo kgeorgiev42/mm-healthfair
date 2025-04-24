@@ -1,11 +1,11 @@
 import argparse
-import sys
 import glob
 import os
-import polars as pl
-import numpy as np
+import sys
 
 import lightning as L
+import numpy as np
+import polars as pl
 import toml
 from datasets import CollateFn, CollateTimeSeries, MIMIC4Dataset
 from lightning.pytorch.callbacks import (
@@ -14,7 +14,6 @@ from lightning.pytorch.callbacks import (
     ModelCheckpoint,
 )
 from lightning.pytorch.loggers import CSVLogger, WandbLogger
-
 from models import MMModel, SaveLossesCallback
 from torch.utils.data import DataLoader
 
@@ -114,34 +113,66 @@ if __name__ == "__main__":
     if args.outcome not in outcomes:
         print(f"Outcome {args.outcome} must be included in targets.toml.")
         sys.exit()
-    if fusion_method!="None" and len(modalities) < 2:
+    if fusion_method != "None" and len(modalities) == 1:
         print("Fusion method is not None, but only one modality is provided. Exiting..")
         sys.exit()
-        
+
     outcome_idx = outcomes.index(args.outcome)
-    print('------------------------------------------')
+    print("------------------------------------------")
     print("MMHealthFair: Multimodal learning pipeline")
-    print(f'Creating multimodal learning pipeline for outcome "{outcomes_disp[outcome_idx]}"')
-    print(f'Modalities used: {modalities}')
-    print(f'Fusion method: {fusion_method}')
-    print('------------------------------------------')
+    print(
+        f'Creating multimodal learning pipeline for outcome "{outcomes_disp[outcome_idx]}"'
+    )
+    print(f"Modalities used: {modalities}")
+    print(f"Fusion method: {fusion_method}")
+    print("------------------------------------------")
     L.seed_everything(0)
 
     # Get training and validation ids
-    if len(glob.glob(os.path.join(args.ids_path, "training_ids_" + args.outcome + ".csv"))) == 0:
+    if (
+        len(
+            glob.glob(
+                os.path.join(args.ids_path, "training_ids_" + args.outcome + ".csv")
+            )
+        )
+        == 0
+    ):
         print(f"No training ids found for outcome {args.outcome}. Exiting..")
         sys.exit()
 
-    if len(glob.glob(os.path.join(args.ids_path, "validation_ids_" + args.outcome + ".csv"))) == 0:
+    if (
+        len(
+            glob.glob(
+                os.path.join(args.ids_path, "validation_ids_" + args.outcome + ".csv")
+            )
+        )
+        == 0
+    ):
         print(f"No validation ids found for outcome {args.outcome}. Exiting..")
         sys.exit()
 
-    train_ids = pl.read_csv(os.path.join(args.ids_path, "training_ids_" + args.outcome + ".csv")).select("subject_id").to_numpy().flatten()
-    val_ids = pl.read_csv(os.path.join(args.ids_path, "validation_ids_" + args.outcome + ".csv")).select("subject_id").to_numpy().flatten()
+    train_ids = (
+        pl.read_csv(
+            os.path.join(args.ids_path, "training_ids_" + args.outcome + ".csv")
+        )
+        .select("subject_id")
+        .to_numpy()
+        .flatten()
+    )
+    val_ids = (
+        pl.read_csv(
+            os.path.join(args.ids_path, "validation_ids_" + args.outcome + ".csv")
+        )
+        .select("subject_id")
+        .to_numpy()
+        .flatten()
+    )
 
     if args.sample is not None:
         ### Randomly sample train_ids
-        print(f'Using random sample of {args.sample} subjects for training and validation.')
+        print(
+            f"Using random sample of {args.sample} subjects for training and validation."
+        )
         train_ids = np.random.choice(train_ids, args.sample, replace=False)
         val_ids = np.random.choice(val_ids, args.sample // 5, replace=False)
         args.outcome = args.outcome + "_sample"
@@ -155,20 +186,18 @@ if __name__ == "__main__":
         with_notes=with_notes,
     )
     training_set.print_label_dist()
-    #training_set.__getitem__(0)
-    #sys.exit()
+    # training_set.__getitem__(0)
+    # sys.exit()
 
-    n_static_features = (
-        training_set.get_feature_dim()
-    )  # add -1 if dropping label col
+    n_static_features = training_set.get_feature_dim()  # add -1 if dropping label col
 
     if not static_only:
         n_dynamic_features = (
             training_set.get_feature_dim("dynamic_0"),
             training_set.get_feature_dim("dynamic_1"),
         )
-        #print(n_dynamic_features)
-        #print(n_static_features)
+        # print(n_dynamic_features)
+        # print(n_static_features)
     else:
         n_dynamic_features = (None, None)
 
@@ -204,7 +233,9 @@ if __name__ == "__main__":
         fusion_method=fusion_method,
         modalities=modalities,
         st_first=st_first,
-        dataset=training_set if args.use_class_weights else None, # Pass in dataset for adjusting class weights
+        dataset=training_set
+        if args.use_class_weights
+        else None,  # Pass in dataset for adjusting class weights
     )
 
     # trainer
@@ -228,8 +259,9 @@ if __name__ == "__main__":
         filename=f"{args.outcome}_{fusion_method}_{mod_str}",
     )
     lr_monitor = LearningRateMonitor(logging_interval="epoch")
-    save_losses_callback = SaveLossesCallback(log_dir=f"logs/{args.outcome}_{fusion_method}_{mod_str}/", 
-                                              save_every_n_epochs=5)
+    save_losses_callback = SaveLossesCallback(
+        log_dir=f"logs/{args.outcome}_{fusion_method}_{mod_str}/", save_every_n_epochs=5
+    )
 
     trainer = L.Trainer(
         max_epochs=n_epochs,
