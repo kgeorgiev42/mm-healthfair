@@ -88,6 +88,9 @@ def bias_corrected_ci(bootstrap_samples, observed_value):
     # Adjust percentiles
     alpha = [0.025, 0.975]  # For a 95% CI
     adjusted_percentiles = norm.cdf(z0 + (z0 + norm.ppf(alpha)) / (1 - a * (z0 + norm.ppf(alpha))))
+    # If any value is null, set to alpha
+    if np.isnan(adjusted_percentiles[0]):
+        adjusted_percentiles = alpha
     lower_bound = np.percentile(sorted_samples, adjusted_percentiles[0] * 100)
     upper_bound = np.percentile(sorted_samples, adjusted_percentiles[1] * 100)
     return lower_bound, upper_bound

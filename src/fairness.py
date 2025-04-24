@@ -167,10 +167,11 @@ if __name__ == "__main__":
     print('------------------------------------------')
     print("MMHealthFair: Multimodal Fairness analysis")
     print('------------------------------------------')
-    print(f'Evaluating fairness for outcome "{outcomes_disp[outcome_idx]}"')
-    print(f'Modalities used: {modalities}')
-    print(f'Fusion method: {fusion_method}')
-    print(f'Across multiple models: {args.across_models}')
+    if not args.across_models:
+        print(f'Evaluating fairness for outcome "{outcomes_disp[outcome_idx]}"')
+        print(f'Modalities used: {modalities}')
+        print(f'Fusion method: {fusion_method}')
+    print(f'Fairness across multiple models: {args.across_models}')
     ### Get test ids
     if (len(model_path) == 0) and (args.across_models == False):
         print(f"No model found at {args.model_path}. Exiting..")
@@ -245,7 +246,7 @@ if __name__ == "__main__":
             plot_bar_metric_frame(group_metrics, y_test, y_hat, attr_pf,
                                   attribute=disp, 
                                   n_boot=args.boot_samples, seed=args.seed,
-                                  save_path=os.path.join(fair_path, f"error_by_{disp}.png"))
+                                  save_path=os.path.join(fair_path, f"error_by_{pf}.png"))
 
         # Global fairness measures
         dpr, eor, eop = get_bootstrapped_fairness_measures(y_test, y_hat, attr_pf,
