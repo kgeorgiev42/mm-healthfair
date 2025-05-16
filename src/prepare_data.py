@@ -3,6 +3,8 @@ import glob
 import os
 import sys
 
+import numpy as np
+import pandas as pd
 import polars as pl
 import toml
 from tqdm import tqdm
@@ -100,6 +102,11 @@ parser.add_argument(
     help="Flag for whether to add mean of dynamic features to static data.",
 )
 parser.add_argument(
+    "--standardize",
+    action="store_true",
+    help="Flag for whether to standardize timeseries data with minmax scaling (in the range [0,1]).",
+)
+parser.add_argument(
     "--max_elapsed",
     type=int,
     default=72,
@@ -179,7 +186,6 @@ vitals = config["attributes"]["vitals"]
 ## Features to save within EHR data (not candidates for exclusion due to high correlation)
 feats_to_save = config["attributes"]["feats_to_save"]
 
-
 print("---------------------------------")
 print("START STATIC DATA PREPROCESSING")
 print("---------------------------------")
@@ -218,6 +224,7 @@ feature_dict, col_dict = generate_interval_dataset(
     args.impute,
     args.include_dyn_mean,
     args.no_resample,
+    args.standardize,
     args.max_elapsed,
     vitals,
     outcomes,
@@ -259,7 +266,7 @@ print("---------------------------------")
 for outcome in outcomes:
     print(f"Processing splits for outcome: {outcome}")
     ehr_data = ehr_data.filter(pl.col("subject_id").is_in(feature_dict.keys()))
-    generate_train_val_test_set(
+    train_dict = generate_train_val_test_set(
         ehr_data,
         args.output_dir,
         outcome,
@@ -271,6 +278,25 @@ for outcome in outcomes:
         stratify=args.stratify,
         verbose=args.verbose,
     )
+
+### Add scaled feature variants to feature dictionary
+print("Adding scaled feature variants to feature dictionary..")
+prep_data = pd.concat([train_dict["train"], train_dict["val"], train_dict["test"]])
+prep_data = encode_categorical_features(pl.DataFrame(prep_data))
+prep_data = prep_data.to_pandas()
+static_cols = col_dict['static_cols']
+dynamic0_cols = col_dict['dynamic0_cols']
+dynamic1_cols = col_dict['dynamic1_cols']
+
+# Create a mapping of subject_id to its corresponding scaled features
+scaled_features_map = prep_data[["subject_id"] + static_cols]
+scaled_features_map = scaled_features_map.set_index("subject_id").to_dict(orient="index")
+
+for p_id in tqdm(feature_dict.keys()):
+    #print(scaled_features_map[p_id])
+    feature_dict[p_id]["static"] = np.array(list(scaled_features_map[p_id].values())).round(5).astype(np.float32)
+    feature_dict[p_id]["static"] = feature_dict[p_id]["static"].reshape(1, -1)
+
 print("---------------------------------")
 print("Finished train/val/test split creation.")
 print("---------------------------------")

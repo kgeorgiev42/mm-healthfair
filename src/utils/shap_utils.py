@@ -2,10 +2,14 @@ import os
 
 import matplotlib.pyplot as plt
 import shap
+
+import lightning as L
 import torch
+import torch.nn.functional as F
+from torch import nn
 
 
-def get_feature_names(test_set, modality_type="tabular"):
+def get_feature_names(test_set, modalities):
     """
     Get feature names based on the modality type.
 
@@ -16,66 +20,99 @@ def get_feature_names(test_set, modality_type="tabular"):
     Returns:
     - feature_names: List of feature names.
     """
-    if modality_type == "tabular":
-        feature_names = test_set.get_feature_list()
-    elif modality_type == "ts-vitals":
-        feature_names = test_set.get_feature_list("dynamic_1")
-    elif modality_type == "ts-labs":
-        feature_names = test_set.get_feature_list("dynamic_0")
-    elif modality_type == "notes":
-        feature_names = test_set.get_feature_list("notes")["sentence"]
-    return feature_names
+    fn_map = {}
+    for modality_type in modalities:
+        if modality_type == "static":
+            feature_names = test_set.get_feature_list()
+            fn_map['static'] = feature_names
+        elif modality_type == "timeseries":
+            #print(test_set.col_dict)
+            feature_names = test_set.get_feature_list("dynamic0")
+            fn_map['ts-vitals'] = feature_names
+            feature_names = test_set.get_feature_list("dynamic1")
+            fn_map['ts-labs'] = feature_names
 
+    return fn_map
 
-def get_shap_values(model, dataloader, device=None, bg_size=500):
+class ModelWrapper(torch.nn.Module):
     """
-    Calculate SHAP values for a given model and data batch using DeepExplainer.
+    A wrapper around the model to ensure scalar outputs for SHAP.
     """
-    # Move the model to the specified device
-    model = model.to(device)
+    def __init__(self, model, modality,
+                 total_dim, target_size,
+                 ts_ind=None):
+        super().__init__()
+        self.model = model
+        self.modality = modality
+        self.ts_ind = ts_ind  # Index for timeseries data
+        self.fc = nn.Linear(total_dim, target_size)  # Linear layer for final output
 
-    # Wrap the model to output a scalar (e.g., probability of the positive class)
-    class ScalarOutputModel(torch.nn.Module):
-        def __init__(self, base_model):
-            super().__init__()
-            self.base_model = base_model
+    def forward(self, x):
+        if self.modality == "static":
+            # Forward pass for static modality
+            embed = self.model.embed_static(x)
+        elif self.modality == "timeseries":
+            # Forward pass for timeseries modality
+            self.model.train()
+            embed = self.model.embed_timeseries[self.ts_ind](x)
+            embed = embed.view(embed.size(0), embed.size(1), -1)  # Flatten the final dimension
+        elif self.modality == "notes":
+            # Forward pass for notes modality
+            embed = self.model.embed_notes(x)
+        else:
+            raise ValueError(f"Unsupported modality: {self.modality}")
 
-        def forward(self, batch):
-            # Move batch to the same device as the model
-            batch = [b.to(device) if isinstance(b, torch.Tensor) else b for b in batch]
-            logits, _ = self.base_model.prepare_batch(batch)
-            probs = torch.sigmoid(logits)  # Convert logits to probabilities
-            return probs.squeeze(-1)  # Ensure scalar output for each sample
+        # Pass through the Linear layer to generate outputs
+        if self.modality == "timeseries":
+            self.model.eval()
+            return embed
+        return self.fc(embed)
 
-    scalar_output_model = ScalarOutputModel(model)
+def get_shap_values(model, 
+                    batch, 
+                    device,
+                    num_ts,
+                    modalities):
+    """
+    Compute SHAP values for each modality using the model's prepare_batch method.
+    """
+    s, d, lengths, n = batch[0], batch[2], batch[3], batch[4]
+    ts_data = {}
+    for i in range(num_ts):
+        ts_data['dynamic' + str(i)] = d[i]
+    shap_values = {}
 
-    # Get a batch of data from the DataLoader
-    batch = next(iter(dataloader))
-    batch = [
-        b.to(device) if isinstance(b, torch.Tensor) else b for b in batch
-    ]  # Move batch to the correct device
-
-    # Use a subset of the data as the background dataset
-    background = batch[0][:bg_size]  # Assuming the first element is the input data
-
-    # Initialize DeepExplainer
-    explainer = shap.DeepExplainer(scalar_output_model, background)
-
-    # Calculate SHAP values
-    shap_values = explainer.shap_values(batch[0])  # Pass only the input data
+    if "static" in modalities:
+        #print("Computing SHAP values for static modality...")
+        wrapper_static = ModelWrapper(model, "static", total_dim=64, target_size=1).to(device)
+        explainer_static = shap.DeepExplainer(wrapper_static, s.to(device))
+        shap_values["static"] = explainer_static.shap_values(s.to(device), check_additivity=False)
+    if "timeseries" in modalities:
+        #print("Computing SHAP values for timeseries modality...")
+        ts_shap_values = {}
+        for i in range(num_ts):
+            wrapper_ts = ModelWrapper(model, "timeseries", total_dim=128, target_size=1, ts_ind=i).to(device)
+            explainer_ts = shap.DeepExplainer(wrapper_ts, ts_data['dynamic' + str(i)].to(device))
+            ts_shap_values['dynamic' + str(i)] = explainer_ts.shap_values(ts_data['dynamic' + str(i)].to(device), check_additivity=False)
+        shap_values["timeseries"] = ts_shap_values
+    if "notes" in modalities:
+        #print("Computing SHAP values for notes modality...")
+        wrapper_notes = ModelWrapper(model, "notes", total_dim=64, target_size=1).to(device)
+        explainer_notes = shap.DeepExplainer(wrapper_notes, n.to(device))
+        shap_values["notes"] = explainer_notes.shap_values(n.to(device), check_additivity=False)
 
     return shap_values
 
 
 def get_shap_summary_plot(
-    shap_values,
-    feature_names,
+    shap_obj,
     outcome="In-hospital Death",
     fusion_type=None,
     modality=None,
     max_features=20,
-    figsize=(8, 5),
+    figsize=(7, 8),
     save_path=None,
+    heatmap=False,
 ):
     """
     Generate a SHAP summary plot.
@@ -89,19 +126,31 @@ def get_shap_summary_plot(
     - None: Displays the SHAP summary plot.
     """
     plt.figure()
-    print(shap_values.shape, feature_names)
-    shap.summary_plot(
-        shap_values,
-        feature_names=feature_names,
-        plot_size=figsize,
-        plot_type="violin",
-        max_display=max_features,
-        show=False,
-    )
-    plt.title(f"SHAP Global Importance: {outcome}, {fusion_type}({modality}).")
+    shap.initjs()
+    if modality in ["static", "timeseries"]:
+        if heatmap:
+            shap_obj.values = shap_obj.values.round(3)
+            shap.plots.heatmap(
+                shap_obj,
+                max_display=max_features,
+                plot_width=9,
+                show=False
+            )
+        else:
+            shap.plots.beeswarm(
+                shap_obj,
+                plot_size=figsize,
+                max_display=max_features,
+                show=False,
+            )
+    plt.grid('both')
+    if heatmap:
+        plt.title(f"Heatmap view for {modality} modality.")
+    else:
+        plt.title(f"SHAP Global Importance for {modality} modality: {outcome}, {fusion_type}.")
     plt.savefig(save_path, bbox_inches="tight", dpi=300)
     plt.close()
-    print(f"SHAP summary plot saved to {save_path}")
+    print(f"SHAP summary plot for {modality} modality saved to {save_path}.")
 
 
 def get_shap_partial_dependence(

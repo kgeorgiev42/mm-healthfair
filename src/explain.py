@@ -4,16 +4,20 @@ import os
 import sys
 
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 import polars as pl
 import shap
 import toml
 import torch
+
+from tqdm import tqdm
 from datasets import CollateFn, CollateTimeSeries, MIMIC4Dataset
 from models import MMModel
 from torch import concat
 from torch.utils.data import DataLoader
-from utils.functions import load_pickle
+from utils.functions import load_pickle, save_pickle
+import json
 from utils.shap_utils import (
     get_feature_names,
     get_shap_group_difference,
@@ -32,21 +36,28 @@ if __name__ == "__main__":
         "data_path",
         type=str,
         help="Path to the pickled data dictionary generated from prepare_data.py.",
-        default="../outputs/processed_data/mmfair_feat.pkl",
+        default="../outputs/prep_data/mmfair_feat.pkl",
     )
     parser.add_argument(
         "--col_path",
         "-p",
         type=str,
         help="Path to the pickled column dictionary generated from prepare_data.py.",
-        default="../outputs/processed_data/mmfair_cols.pkl",
+        default="../outputs/prep_data/mmfair_cols.pkl",
+    )
+    parser.add_argument(
+        "--feat_names",
+        "-f",
+        type=str,
+        help="Path to a JSON file containing lookup names for each feature.",
+        default="../config/shap_feat_map.json",
     )
     parser.add_argument(
         "--ids_path",
         "-i",
         type=str,
         help="Directory containing test ids.",
-        default="../outputs/processed_data",
+        default="../outputs/prep_data",
     )
     parser.add_argument(
         "--exp_path",
@@ -104,6 +115,11 @@ if __name__ == "__main__":
         "If local, uses DeepExplainer to explain individual predictions over all modalities (requires a fused static-timeseries-text model).",
     )
     parser.add_argument(
+        "--use_heatmaps",
+        action="store_true",
+        help="Use heatmaps for SHAP summary plots instead of beeswarm plots.",
+    )
+    parser.add_argument(
         "--group_by_risk",
         action="store_true",
         help="Show stratified risk difference plots by attribute if using exp_mode=global.",
@@ -114,12 +130,6 @@ if __name__ == "__main__":
         type=int,
         default=10,
         help="Risk quantile to use for global risk difference explanations if group_by_risk=True (Default is 10, treated as highest-risk for deciles).",
-    )
-    parser.add_argument(
-        "--diff_modality",
-        type=str,
-        default="static",
-        help="Modality to use for risk difference plots if group_by_risk=True (defaults to static).",
     )
     parser.add_argument(
         "--pdp_analysis",
@@ -170,7 +180,9 @@ if __name__ == "__main__":
     outcomes_col = targets["outcomes"]["colormap"]
     attributes = targets["attributes"]["labels"]
     attr_disp = targets["attributes"]["display"]
-    batch_size = config["data"]["batch_size"]
+    batch_size = 16
+    ### Edit when adding more timeseries measurements
+    ts_types = ['ts-vitals', 'ts-labs']
     ### Model-specific setup
     model_path = os.path.join(
         os.path.join(args.model_dir, args.model_path), args.model_path + ".ckpt"
@@ -195,13 +207,14 @@ if __name__ == "__main__":
     with_notes = True if "notes" in modalities else False
     fusion_method = "None"
     if "mag" in args.model_path:
-        fusion_method = "EF-mag"
+        fusion_method = "IF-mag"
     elif "concat" in args.model_path:
-        fusion_method = "EF-concat"
+        fusion_method = "IF-concat"
     if args.outcome not in outcomes:
         print(f"Outcome {args.outcome} must be included in targets.toml.")
         sys.exit()
     outcome_idx = outcomes.index(args.outcome)
+    compute_shap = False
     ### Set plotting style
     plt.rcParams.update(
         {"font.size": 13, "font.weight": "normal", "font.family": "serif"}
@@ -242,6 +255,19 @@ if __name__ == "__main__":
         print(f"No risk dictionary found at {risk_path}. Exiting..")
         sys.exit()
 
+    if not os.path.exists(args.feat_names):
+        print(f"No feature names found at {args.feat_names}. Exiting..")
+        sys.exit()
+
+    if not os.path.exists(os.path.join(args.exp_path, f"{args.model_path}/shap_{args.model_path}.pkl")):
+        print(f"No SHAP dictionary found at {os.path.join(args.exp_path, f'{args.model_path}/shap_{args.model_path}.pkl')}.")
+        print("Running batch-wise SHAP computation...")
+        compute_shap = True
+
+    if not compute_shap:
+        print(f"Loading pre-computed SHAP dictionary from {os.path.join(args.exp_path, f'shap_{args.model_path}.pkl')}")
+        shap_dict = load_pickle(os.path.join(args.exp_path, f"{args.model_path}/shap_{args.model_path}.pkl"))
+
     test_ids = (
         pl.read_csv(os.path.join(args.ids_path, "testing_ids_" + args.outcome + ".csv"))
         .select("subject_id")
@@ -267,157 +293,105 @@ if __name__ == "__main__":
         num_workers=num_workers,
         collate_fn=CollateFn() if static_only else CollateTimeSeries(),
         persistent_workers=True if num_workers > 0 else False,
+        shuffle=False,  # Ensure no shuffling to reproduce exact test set samples
     )
-    batch = next(iter(dataloader))
-    # trainer = Trainer(accelerator="auto")
-    # output = trainer.predict(model, dataloaders=dataloader)
-    # prob = np.array(concat([out[0] for out in output])).flatten().astype(np.float32)
     ### SHAP setup
     ### Collect feature explanations
     if args.exp_mode == "global":
-        shap_dict = {}
-        shap_ts = {}
-        shap_notes = {}
-        shap_ehr = {}
-        for modality in modalities:
-            if modality == "static":
-                print("Processing explanations for static EHR modality...")
-                feature_names = get_feature_names(test_set, modality_type="tabular")
-                shap_scores = get_shap_values(model, dataloader, device=device)
-                print(shap_scores.shape, shap_scores[0])
-                # Reshape shap scores to batch_size x length of feature_names
-                # shap_scores = shap_scores.reshape(shap_scores.shape[0], len(feature_names))
-                get_shap_summary_plot(
-                    shap_scores,
-                    feature_names,
-                    outcome=outcomes_disp[outcome_idx],
-                    fusion_type=fusion_method,
-                    modality=modality,
-                    max_features=args.global_max_features,
-                    figsize=(8, 5),
-                    save_path=os.path.join(exp_path, f"shap_summary_{modality}.png"),
-                )
-                shap_dict.update(
-                    {
-                        feature: shap_scores[:, idx]
-                        for idx, feature in enumerate(feature_names)
-                    }
-                )
-                shap_ehr.update(
-                    {
-                        feature: shap_scores[:, idx]
-                        for idx, feature in enumerate(feature_names)
-                    }
-                )
-            elif modality == "timeseries":
-                print("Processing explanations for timeseries modality...")
-                features_vitals = get_feature_names(test_set, modality_type="ts-vitals")
-                features_labs = get_feature_names(test_set, modality_type="ts-labs")
-                feature_names = features_vitals + features_labs
-                # shap_concat = concat([shap_scores_vitals, shap_scores_labs], dim=1)
-                # feat_concat = concat([x_test_vit, x_test_lab], dim=1)
-                ### If using timeseries, plot summary over a single timepoint (t=0)
-                shap_scores = shap_scores.mean(axis=3)[:, 0, :]
-                get_shap_summary_plot(
-                    shap_scores,
-                    feature_names,
-                    outcome=outcomes_disp[outcome_idx],
-                    fusion_type=fusion_method,
-                    modality=modality,
-                    max_features=args.global_max_features,
-                    figsize=(8, 5),
-                    save_path=os.path.join(exp_path, f"shap_summary_{modality}.png"),
-                )
-                shap_dict.update(
-                    {
-                        feature: shap_scores[:, idx]
-                        for idx, feature in enumerate(feature_names)
-                    }
-                )
-                shap_ts.update(
-                    {
-                        feature: shap_scores[:, idx]
-                        for idx, feature in enumerate(feature_names)
-                    }
-                )
-            elif modality == "notes":
-                print("Processing explanations for notes modality...")
-                feature_names = get_feature_names(test_set, modality_type="notes")
-                shap_scores, x_test = get_shap_values(
-                    model, batch, test_set, modality_type="notes"
-                )
-                get_shap_summary_plot(
-                    shap_scores,
-                    x_test,
-                    feature_names,
-                    outcome=outcomes_disp[outcome_idx],
-                    fusion_type=fusion_method,
-                    modality=modality,
-                    max_features=args.global_max_features,
-                    figsize=(8, 5),
-                    save_path=os.path.join(exp_path, f"shap_summary_{modality}.png"),
-                )
-                shap_dict.update(
-                    {
-                        feature: shap_scores[:, idx]
-                        for idx, feature in enumerate(feature_names)
-                    }
-                )
-                shap_notes.update(
-                    {
-                        feature: shap_scores[:, idx]
-                        for idx, feature in enumerate(feature_names)
-                    }
-                )
-        ### Plot PDP for a feature of interest
-        if args.pdp_analysis:
-            if args.pdp_feature not in shap_dict.keys():
-                print(
-                    f"Feature {args.pdp_feature} not found in SHAP summary plot. Exiting..."
-                )
-                sys.exit()
-            print(f"Generating PDP for feature {args.pdp_feature}...")
-            for attribute, disp in zip(attributes, attr_disp, strict=False):
-                get_shap_partial_dependence(
-                    shap_dict,
-                    args.pdp_feature,
-                    attribute,
-                    disp,
-                    outcome=outcomes_disp[outcome_idx],
-                    fusion_type=fusion_method,
-                    modalities=modalities,
-                    save_dir=exp_path,
-                    verbose=args.verbose,
-                )
+        ### Get names as recorded in SHAP dictionary
+        shap_colnames = get_feature_names(test_set, modalities=modalities)
+        ### Load JSON file mapping feature names to display names
+        with open(args.feat_names, "r") as f:
+            feature_names = json.load(f)
+        if compute_shap:
+            shap_dict = {}
+            for batch_idx, batch in tqdm(enumerate(dataloader),
+                                        desc='Computing SHAP values across all test batches...'):
+                shap_scores = get_shap_values(model, batch, device=device, num_ts=2,
+                                        modalities=modalities)
+                shap_dict['batch_' + str(batch_idx)] = shap_scores
+            
+            save_pickle(shap_dict, args.exp_path, f"{args.model_path}/shap_{args.model_path}.pkl")
+            print(f"SHAP values saved to {os.path.join(args.exp_path, f'shap_{args.model_path}.pkl')}")
+        print('Displaying multimodal SHAP summary plots...')
+        if 'static' in modalities:
+            target_names = [feature_names.get(k, k) for k in shap_colnames['static']]
+            # Collect all static SHAP values into a unified np.array
+            shap_global_values = []
+            actual_values = []
+            for batch_idx, batch in enumerate(dataloader):
+                for i in range(len(batch[0])):
+                    batch_shap = shap_dict['batch_' + str(batch_idx)]['static'][i].reshape(1, -1)
+                    shap_global_values.extend(np.array(batch_shap))
+                    actual_values.extend(np.array(batch[0][i]))
+            shap_global_values = np.array(shap_global_values)
+            actual_values = np.array(actual_values)
+            shap_obj = shap.Explanation(values=shap_global_values, 
+                                        feature_names=target_names,
+                                        data=actual_values)
 
-        ### Plot stratified risk difference plots by attribute
-        if args.global_group_by_risk:
-            print(
-                f"Generating risk difference plots (one vs rest) with target quantile {args.diff_risk_quantile}..."
-            )
-            if args.diff_modality == "static":
-                shap_diff = shap_ehr
-            elif args.diff_modality == "timeseries":
-                shap_diff = shap_ts
-            else:
-                shap_diff = shap_notes
-
-            get_shap_group_difference(
-                shap_diff,
-                risk_dict,
-                args.diff_risk_quantile,
-                feature_names=None,
-                outcome=outcomes_disp[outcome_idx],
+            get_shap_summary_plot(
+                shap_obj,
                 fusion_type=fusion_method,
-                modalities=modalities,
+                modality="static",
+                outcome=outcomes_disp[outcome_idx],
                 max_features=args.global_max_features,
                 save_path=os.path.join(
                     exp_path,
-                    f"shap_gdiff_{args.diff_modality}_rg_{args.diff_risk_quantile}_vs_rest.png",
+                    f"shap_global_{outcomes[outcome_idx]}_static_summary.png",
                 ),
-                figsize=(8, 5),
-                verbose=True,
+                heatmap=args.use_heatmaps,
             )
+        
+        if 'timeseries' in modalities:
+            ### Replace if adding more timeseries measurements
+            for i in range(len(ts_types)):
+                print(f"Processing SHAP values for {ts_types[i]}...")
+                if ts_types[i] == 'ts-vitals':
+                    target_names = shap_colnames['ts-vitals']
+                    tg_field = 'dynamic0'
+                else:
+                    target_names = [feature_names.get(k, k) for k in shap_colnames['ts-labs']]
+                    tg_field = 'dynamic1'
+                # Collect all timeseries SHAP values into a unified np.array
+                shap_global_values = []
+                actual_values = []
+                test_id = 0
+                # Use mean aggregation across all timepoints to display importances
+                for batch_idx, batch in enumerate(dataloader):
+                    for ts_i in range(len(batch[2][i])):
+                        batch_shap = shap_dict['batch_' + str(batch_idx)]['timeseries'][tg_field][ts_i]
+                        agg_shap = np.mean(np.mean(batch_shap, axis=2), axis=0).reshape(1, -1)
+                        test_id += 1
+                        # Only average over valid (non -1, 0) values in batch[2][i]
+                        data = np.array(batch[2][i][ts_i])
+                        mask = data > 0
+                        # Avoid division by zero: set mean to 0 if all values are -1
+                        valid_counts = np.sum(mask, axis=0, keepdims=True)
+                        valid_counts[valid_counts == 0] = 1
+                        sum_valid = np.sum(np.where(mask, data, 0), axis=0, keepdims=True)
+                        mean_valid = sum_valid / valid_counts
+                        agg_values = mean_valid.reshape(1, -1)
+                        # Append values
+                        shap_global_values.extend(np.array(agg_shap))
+                        actual_values.extend(np.array(agg_values))
+                shap_global_values = np.array(shap_global_values)
+                actual_values = np.array(actual_values)
+                shap_obj = shap.Explanation(values=shap_global_values, 
+                                            feature_names=target_names,
+                                            data=actual_values)
+                get_shap_summary_plot(
+                    shap_obj,
+                    fusion_type=fusion_method,
+                    modality="timeseries",
+                    outcome=outcomes_disp[outcome_idx],
+                    max_features=args.global_max_features,
+                    save_path=os.path.join(
+                        exp_path,
+                        f"shap_global_{outcomes[outcome_idx]}_{ts_types[i]}_summary.png",
+                    ),
+                    heatmap=args.use_heatmaps,
+                )
 
     if args.exp_mode == "local":
         print(
