@@ -57,7 +57,7 @@ if __name__ == "__main__":
         "-a",
         type=str,
         help="Directory containing attributes metadata (original ehr_static.csv).",
-        default="../outputs/sample_data/ehr_static.csv",
+        default="../outputs/ext_data/ehr_static.csv",
     )
     parser.add_argument(
         "--outcome",

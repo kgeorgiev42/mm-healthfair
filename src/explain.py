@@ -18,14 +18,12 @@ from torch import concat
 from torch.utils.data import DataLoader
 from utils.functions import load_pickle, save_pickle
 import json
+from utils.preprocessing import encode_categorical_features
 from utils.shap_utils import (
     get_feature_names,
-    get_shap_group_difference,
-    get_shap_partial_dependence,
+    get_shap_local_decision_plot,
     get_shap_summary_plot,
-    get_shap_text_plot,
     get_shap_values,
-    get_standard_force_plot,
 )
 
 if __name__ == "__main__":
@@ -74,6 +72,13 @@ if __name__ == "__main__":
         default="../outputs/evaluation",
     )
     parser.add_argument(
+        "--attr_path",
+        "-a",
+        type=str,
+        help="Directory containing attributes metadata (original ehr_static.csv).",
+        default="../outputs/ext_data/ehr_static.csv",
+    )
+    parser.add_argument(
         "--outcome",
         "-o",
         type=str,
@@ -120,41 +125,11 @@ if __name__ == "__main__":
         help="Use heatmaps for SHAP summary plots instead of beeswarm plots.",
     )
     parser.add_argument(
-        "--group_by_risk",
-        action="store_true",
-        help="Show stratified risk difference plots by attribute if using exp_mode=global.",
-    )
-    parser.add_argument(
-        "--diff_risk_quantile",
-        "-dq",
-        type=int,
-        default=10,
-        help="Risk quantile to use for global risk difference explanations if group_by_risk=True (Default is 10, treated as highest-risk for deciles).",
-    )
-    parser.add_argument(
-        "--pdp_analysis",
-        action="store_true",
-        help="Generate partial dependence plots (PDP) for a feature of interest if using exp_mode=global.",
-    )
-    parser.add_argument(
-        "--pdp_feature",
-        type=str,
-        default="anchor_age",
-        help="Feature to use for partial dependence plots (PDP), looking at impact by sensitive attribute, e.g. one of top ranking features in SHAP summary plot.",
-    )
-    parser.add_argument(
         "--global_max_features",
         "-g",
         type=int,
         default=20,
         help="Top N features to plot in global-level explanations.",
-    )
-    parser.add_argument(
-        "--local_samples",
-        "-s",
-        type=int,
-        default=10,
-        help="# subjects to generate local-level explanations for if using exp_model=local.",
     )
     parser.add_argument(
         "--local_risk_group",
@@ -228,11 +203,7 @@ if __name__ == "__main__":
     print(f"Mode: {args.exp_mode}")
     if args.exp_mode == "global":
         print(f"Global max features: {args.global_max_features}")
-        print(f"Group by risk: {args.group_by_risk}")
-        print(f"Risk difference quantile: {args.diff_risk_quantile}")
-        print(f"PDP analysis: {args.pdp_analysis}")
     else:
-        print(f"Local samples: {args.local_samples}")
         print(f"Risk group target: {args.local_risk_group}")
     print("------------------------------------------")
     # Get test ids
@@ -296,23 +267,24 @@ if __name__ == "__main__":
         shuffle=False,  # Ensure no shuffling to reproduce exact test set samples
     )
     ### SHAP setup
+    ### Get names as recorded in SHAP dictionary
+    shap_colnames = get_feature_names(test_set, modalities=modalities)
+    ### Load JSON file mapping feature names to display names
+    with open(args.feat_names, "r") as f:
+        feature_names = json.load(f)
+    ### Pre-compute SHAP values if not already done
+    if compute_shap:
+        shap_dict = {}
+        for batch_idx, batch in tqdm(enumerate(dataloader),
+                                    desc='Computing SHAP values across all test batches...'):
+            shap_scores = get_shap_values(model, batch, device=device, num_ts=2,
+                                    modalities=modalities)
+            shap_dict['batch_' + str(batch_idx)] = shap_scores
+        
+        save_pickle(shap_dict, args.exp_path, f"{args.model_path}/shap_{args.model_path}.pkl")
+        print(f"SHAP values saved to {os.path.join(args.exp_path, f'shap_{args.model_path}.pkl')}")
     ### Collect feature explanations
     if args.exp_mode == "global":
-        ### Get names as recorded in SHAP dictionary
-        shap_colnames = get_feature_names(test_set, modalities=modalities)
-        ### Load JSON file mapping feature names to display names
-        with open(args.feat_names, "r") as f:
-            feature_names = json.load(f)
-        if compute_shap:
-            shap_dict = {}
-            for batch_idx, batch in tqdm(enumerate(dataloader),
-                                        desc='Computing SHAP values across all test batches...'):
-                shap_scores = get_shap_values(model, batch, device=device, num_ts=2,
-                                        modalities=modalities)
-                shap_dict['batch_' + str(batch_idx)] = shap_scores
-            
-            save_pickle(shap_dict, args.exp_path, f"{args.model_path}/shap_{args.model_path}.pkl")
-            print(f"SHAP values saved to {os.path.join(args.exp_path, f'shap_{args.model_path}.pkl')}")
         print('Displaying multimodal SHAP summary plots...')
         if 'static' in modalities:
             target_names = [feature_names.get(k, k) for k in shap_colnames['static']]
@@ -395,108 +367,58 @@ if __name__ == "__main__":
 
     if args.exp_mode == "local":
         print(
-            f"Generating local-level SHAP explanations for {args.local_samples} subjects at risk quantile {args.local_risk_group}..."
+            f"Generating local-level SHAP explanations for random subject at risk quantile {args.local_risk_group}..."
         )
-        # Get N random subjects in the specified risk group
-        risk_idx = pd.DataFrame(risk_dict)
-        risk_idx = (
-            risk_idx[risk_dict["risk_quantile"] == args.local_risk_group]
-            .sample(args.local_samples, random_state=0)
-            .index.tolist()
+        if 'p_id' not in shap_dict['batch_0'].keys():
+            print("No patient IDs found in SHAP dictionary. Matching IDs to SHAP values...")
+            p_ctr = 0
+            for i in range(len(shap_dict)):
+                ids_list = []
+                ctr_list = []
+                for pt in shap_dict['batch_' + str(i)]:
+                    ids_list.append(test_ids[p_ctr])
+                    ctr_list.append(p_ctr)
+                    p_ctr += 1
+                shap_dict['batch_' + str(i)]['p_id'] = ids_list
+                shap_dict['batch_' + str(i)]['ctr'] = ctr_list
+        # Get a random subject in the specified risk group
+        #print(risk_dict.keys())
+        risk_idx = pd.DataFrame({k: v for k, v in risk_dict.items() if k in ['test_ids', 'risk_quantile']})
+        #print(risk_idx)
+        risk_idx = risk_idx[risk_idx['risk_quantile'] == args.local_risk_group]['test_ids'].sample(1, random_state=42).values.tolist()
+        shap_colnames = get_feature_names(test_set, modalities=modalities)
+        ### Get static SHAP values for patient
+        static_names = [feature_names.get(k, k) for k in shap_colnames['static']]
+        ### Load in unscaled test data
+        ehr_static = pl.read_csv(args.attr_path)
+        static_values = encode_categorical_features(pl.DataFrame(ehr_static))
+        static_values = static_values.filter(
+            pl.col("subject_id").is_in(list(map(int, risk_idx)))
         )
-        for i, subject in enumerate(risk_idx):
-            ## Get local-level predictions
-            # y_test_subj = y_test[subject]
-            # y_hat_subj = y_hat[subject]
-            # prob_subj = prob[subject]
-            ## Get SHAP values for each modality
-            for modality in modalities:
-                if modality == "static":
-                    feature_names = test_set.get_feature_list()
-                    x_test = batch[0][subject]
-                    emb = model.embed_static(x_test).cpu().numpy()
-                    explainer = shap.DeepExplainer(emb, x_test)
-                    shap_values = explainer.shap_values(x_test)
-                    get_standard_force_plot(
-                        explainer,
-                        shap_values,
-                        x_test,
-                        y_test=None,
-                        y_hat=None,
-                        prob=None,
-                        outcome=outcomes_disp[outcome_idx],
-                        fusion_type=fusion_method,
-                        subject_idx=i + 1,
-                        risk_quantile=args.local_risk_group,
-                        feature_names=feature_names,
-                        save_path=os.path.join(
-                            exp_path,
-                            f"shap_local_{modality}_rg_{args.local_risk_group}_subj_{i+1}.png",
-                        ),
-                        verbose=args.verbose,
-                    )
-                elif modality == "timeseries":
-                    feature_names = test_set.get_feature_list()
-                    # x_test_vit = batch[2][1][subject]
-                    # x_test_lab = batch[2][0][subject]
-                    emb_vit = model.embed_timeseries[1](x_test)
-                    emb_lab = model.embed_timeseries[0](x_test)
-                    emb = concat([emb_vit, emb_lab], dim=1).cpu().numpy()
-                    # x_test = concat([x_test_vit, x_test_lab], dim=1).cpu().numpy()
-                    ### If using timeseries, plot summary over a single timepoint (t=0)
-                    # x_test = feat_concat[:, 0, :]
-                    explainer = shap.DeepExplainer(emb, x_test)
-                    shap_values = explainer.shap_values(x_test)
-                    get_standard_force_plot(
-                        explainer,
-                        shap_values,
-                        x_test,
-                        y_test=None,
-                        y_hat=None,
-                        prob=None,
-                        outcome=outcomes_disp[outcome_idx],
-                        fusion_type=fusion_method,
-                        subject_idx=i + 1,
-                        risk_quantile=args.local_risk_group,
-                        feature_names=feature_names,
-                        save_path=os.path.join(
-                            exp_path,
-                            f"shap_local_{modality}_rg_{args.local_risk_group}_subj_{i+1}.png",
-                        ),
-                        verbose=args.verbose,
-                    )
-
-                elif modality == "notes":
-                    feature_names = get_feature_names(test_set, modality_type="notes")
-                    # x_test = batch[4]
-                    emb = model.embed_notes(x_test).cpu().numpy()
-                    explainer = shap.DeepExplainer(emb, x_test)
-                    # y_test_subj = y_test[subject]
-                    # y_hat_subj = y_hat[subject]
-                    # prob_subj = prob[subject]
-                    # Generate SHAP text plot
-                    get_shap_text_plot(
-                        explainer=explainer,
-                        shap_values=shap_scores,
-                        text_data=x_test,
-                        y_test=None,
-                        y_hat=None,
-                        prob=None,
-                        outcome=outcomes_disp[outcome_idx],
-                        fusion_type=fusion_method,
-                        subject_idx=1,  # Example subject index
-                        risk_quantile=args.local_risk_group,
-                        save_path=os.path.join(
-                            exp_path,
-                            f"shap_local_{modality}_rg_{args.local_risk_group}_subj_{i+1}.png",
-                        ),
-                        verbose=args.verbose,
-                    )
-
-        # Get model predictions
-        # y_test = batch[0][:, outcome_idx].cpu().numpy()
-        # y_hat = model(batch).cpu().numpy()
-        # prob = model(batch, return_prob=True).cpu().numpy()
-        # x_test = batch[1].cpu().numpy()
-        # Get SHAP values
-        # shap_values = get_shap_values(model, batch, test_set, modality_type="tabular")
+        static_values = static_values.select(shap_colnames['static']).to_pandas().to_numpy()
+        print(static_values)
+        # Collect all static SHAP values into a unified np.array
+        shap_static_values = []
+        for batch in shap_dict.keys():
+            if risk_idx[0] not in shap_dict[batch]['p_id']:
+                continue 
+            pt_idx = shap_dict[batch]['p_id'].index(risk_idx[0])
+            static_shap = shap_dict[batch]['static'][pt_idx].reshape(1, -1)
+            shap_static_values.extend(np.array(static_shap))
+        shap_static_values = np.array(shap_static_values)
+        shap_obj = shap.Explanation(values=shap_static_values,
+                                    feature_names=feature_names,
+                                    data=static_values)
+        get_shap_local_decision_plot(
+            shap_obj,
+            expected_value=shap_obj.expected_value,
+            feature_names=static_names,
+            outcome=outcomes_disp[outcome_idx],
+            fusion_type=fusion_method,
+            modality="static",
+            risk_quantile=args.local_risk_group,
+            save_path=os.path.join(
+                exp_path,
+                f"shap_local_{outcomes[outcome_idx]}_static_decision.png",
+            ),
+        )
