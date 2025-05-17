@@ -24,6 +24,7 @@ from utils.shap_utils import (
     get_shap_local_decision_plot,
     get_shap_summary_plot,
     get_shap_values,
+    aggregate_ts
 )
 
 if __name__ == "__main__":
@@ -139,6 +140,12 @@ if __name__ == "__main__":
         help="Risk quantile to use for local-level explanations (generated in evaluate.py).",
     )
     parser.add_argument(
+        "--notes_offset_ref",
+        action="store_true",
+        help="Offset SHAP colormap center for local-level text plot using the expected SHAP value (batch-wise mean)." \
+        "Defaults to False (SHAP colormap centered around 0).",
+    )
+    parser.add_argument(
         "--verbose",
         "-v",
         dest="verbose",
@@ -246,6 +253,7 @@ if __name__ == "__main__":
         .flatten()
     )
     risk_dict = load_pickle(risk_path)
+    emb_dict = load_pickle(args.data_path)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     test_set = MIMIC4Dataset(
         args.data_path,
@@ -337,13 +345,7 @@ if __name__ == "__main__":
                         test_id += 1
                         # Only average over valid (non -1, 0) values in batch[2][i]
                         data = np.array(batch[2][i][ts_i])
-                        mask = data > 0
-                        # Avoid division by zero: set mean to 0 if all values are -1
-                        valid_counts = np.sum(mask, axis=0, keepdims=True)
-                        valid_counts[valid_counts == 0] = 1
-                        sum_valid = np.sum(np.where(mask, data, 0), axis=0, keepdims=True)
-                        mean_valid = sum_valid / valid_counts
-                        agg_values = mean_valid.reshape(1, -1)
+                        agg_values = aggregate_ts(data)
                         # Append values
                         shap_global_values.extend(np.array(agg_shap))
                         actual_values.extend(np.array(agg_values))
@@ -389,6 +391,8 @@ if __name__ == "__main__":
         shap_colnames = get_feature_names(test_set, modalities=modalities)
         ### Get static SHAP values for patient
         static_names = [feature_names.get(k, k) for k in shap_colnames['static']]
+        lab_names = [feature_names.get(k, k) for k in shap_colnames['ts-labs']]
+        vitals_names = shap_colnames['ts-vitals']
         ### Load in unscaled test data
         ehr_static = pl.read_csv(args.attr_path)
         static_values = encode_categorical_features(pl.DataFrame(ehr_static))
@@ -396,29 +400,74 @@ if __name__ == "__main__":
             pl.col("subject_id").is_in(list(map(int, risk_idx)))
         )
         static_values = static_values.select(shap_colnames['static']).to_pandas().to_numpy()
-        print(static_values)
-        # Collect all static SHAP values into a unified np.array
-        shap_static_values = []
-        for batch in shap_dict.keys():
-            if risk_idx[0] not in shap_dict[batch]['p_id']:
+        ### Get multimodal SHAP values for single patient
+        for sb in shap_dict.keys():
+            if risk_idx[0] not in shap_dict[sb]['p_id']:
                 continue 
-            pt_idx = shap_dict[batch]['p_id'].index(risk_idx[0])
-            static_shap = shap_dict[batch]['static'][pt_idx].reshape(1, -1)
-            shap_static_values.extend(np.array(static_shap))
-        shap_static_values = np.array(shap_static_values)
-        shap_obj = shap.Explanation(values=shap_static_values,
-                                    feature_names=feature_names,
+            ### Collect Static SHAP values
+            pt_idx = shap_dict[sb]['p_id'].index(risk_idx[0])
+            static_shap = shap_dict[sb]['static'][pt_idx].reshape(1, -1)
+            shap_expected = shap_dict[sb]['static_expected']
+            shap_static_values = np.array(static_shap)
+            ### Collect and aggregate Timeseries SHAP values
+            shap_vitals = np.array(shap_dict[sb]['timeseries']['dynamic0'][pt_idx])
+            shap_vitals_expected = np.array(shap_dict[sb]['timeseries']['dynamic0_expected'])
+            shap_labs = np.array(shap_dict[sb]['timeseries']['dynamic1'][pt_idx])
+            shap_labs_expected = np.array(shap_dict[sb]['timeseries']['dynamic1_expected'])
+            ### Collect notes SHAP values
+            data_notes = np.array([s[0] for s in emb_dict[risk_idx[0]]['notes']])
+            ### Need to retrieve correct length from original clinical note and filter out batch-wise padded SHAP values
+            shap_notes = np.array(shap_dict[sb]['notes'][pt_idx][0][:len(data_notes)]).reshape(1,-1)[0]
+            shap_notes_expected = np.array(shap_dict[sb]['notes_expected'])
+            # Use mean aggregation across all timepoints to display importances
+            agg_vitals = np.mean(np.mean(shap_vitals, axis=2), axis=0).reshape(1, -1)
+            agg_labs = np.mean(np.mean(shap_labs, axis=2), axis=0).reshape(1, -1)
+            pt_batch_idx = int(sb.split('_')[1])
+            # Get original data
+            for batch_idx, batch in enumerate(dataloader):
+                if batch_idx != pt_batch_idx:
+                    continue
+                data_vitals = np.array(batch[2][0][pt_idx])
+                data_labs = np.array(batch[2][1][pt_idx])
+                data_vitals = np.array(aggregate_ts(data_vitals))
+                data_labs = np.array(aggregate_ts(data_labs))
+
+        # Generate Explanation objects
+        shap_static_obj = shap.Explanation(values=shap_static_values,
+                                    base_values=shap_expected,
+                                    feature_names=static_names,
                                     data=static_values)
+        shap_vitals_obj = shap.Explanation(values=agg_vitals,
+                                    base_values=shap_vitals_expected,
+                                    feature_names=vitals_names,
+                                    data=data_vitals)
+        shap_labs_obj = shap.Explanation(values=agg_labs,
+                                    base_values=shap_labs_expected,
+                                    feature_names=lab_names,
+                                    data=data_labs)
+        shap_notes_obj = shap.Explanation(values=shap_notes,
+                                    base_values=shap_notes_expected,
+                                    feature_names=None,
+                                    data=data_notes)
+        
         get_shap_local_decision_plot(
-            shap_obj,
-            expected_value=shap_obj.expected_value,
-            feature_names=static_names,
-            outcome=outcomes_disp[outcome_idx],
-            fusion_type=fusion_method,
-            modality="static",
+            [shap_static_obj, shap_vitals_obj, shap_labs_obj, shap_notes_obj],
             risk_quantile=args.local_risk_group,
-            save_path=os.path.join(
+            save_static_path=os.path.join(
                 exp_path,
                 f"shap_local_{outcomes[outcome_idx]}_static_decision.png",
             ),
+            save_ts0_path=os.path.join(
+                exp_path,
+                f"shap_local_{outcomes[outcome_idx]}_tsv_decision.png",
+            ),
+            save_ts1_path=os.path.join(
+                exp_path,
+                f"shap_local_{outcomes[outcome_idx]}_tsl_decision.png",
+            ),
+            save_nt_path=os.path.join(
+                exp_path,
+                f"shap_local_{outcomes[outcome_idx]}_notes_text.png",
+            ),
+            nt_offset_ref=args.notes_offset_ref,
         )

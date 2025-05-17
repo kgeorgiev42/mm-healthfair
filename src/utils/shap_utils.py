@@ -1,8 +1,10 @@
 import os
 
 import matplotlib.pyplot as plt
+import matplotlib as mpl
 import numpy as np
 import shap
+from IPython.core.display import HTML
 
 import lightning as L
 import torch
@@ -153,85 +155,260 @@ def get_shap_summary_plot(
     plt.close()
     print(f"SHAP summary plot for {modality} modality saved to {save_path}.")
 
+def aggregate_ts(data):
+    """
+    Use mean aggregation to average timeseries data from the final hidden layer.
+    Ignores missing values from the model output.
+
+    Parameters:
+    - shap_values: The calculated SHAP values.
+
+    Returns:
+    - aggregated_shap_values: Dictionary with feature names as keys and aggregated SHAP values as values.
+    """
+    to_agg = []
+    ## Remove 0-padded intervals
+    for ts in range(len(data)):
+        ## Check if all values in data[ts] are 0
+        if np.all(data[ts] == 0):
+            continue
+        to_agg.append(data[ts])
+
+    ## Do not aggregate on missing values
+    to_agg = np.array(to_agg)
+    # Mask -1 values
+    mask = to_agg > -1
+    # Set -1 values to np.nan for mean calculation
+    to_agg_masked = np.where(mask, to_agg, np.nan)
+    # Compute mean across axis=0, ignoring nan
+    agg_values = np.nanmean(to_agg_masked, axis=0, keepdims=True)
+    agg_values = np.abs(agg_values.reshape(1, -1))
+    agg_values = np.where(np.isnan(agg_values), -1, agg_values).round(2)
+    return agg_values
+
 
 def get_shap_local_decision_plot(
     shap_obj,
-    expected_value,
-    feature_names,
     risk_quantile=None,
-    figsize=(7, 8),
-    save_path=None,
+    figsize=(6, 7),
+    save_static_path=None,
+    save_ts0_path=None,
+    save_ts1_path=None,
+    save_nt_path=None,
+    nt_offset_ref=False
 ):
     """
     Generate a SHAP decision plot for tabular and timeseries data.
     Generate a SHAP text plot for notes data.
     Estimate and show the multimodal degree of dependence.
     """
-    plt.figure(figsize=figsize)
     shap.initjs()
+    # Set format for SHAP values
+    for i in range(len(shap_obj)):
+        #shap_obj[i].values = shap_obj[i].values.round(6)
+        shap_obj[i].base_values = shap_obj[i].base_values.round(3)
+        if i in [1, 2]:
+            shap_obj[i].data = shap_obj[i].data.round(2)
+        #print(max(shap_obj[i][0].values.round(3)), min(shap_obj[i][0].values.round(3)))
+        ### Static EHR modality
+        if i == 0:
+            fig = plt.figure(figsize=figsize)
+            shap_obj[i].data = np.where(shap_obj[i].data == 0, 'No', shap_obj[i].data)
+            shap_obj[i].data = np.where(shap_obj[i].data == '1', 'Yes', shap_obj[i].data)
+            ## Static EHR modality
+            shap.plots.decision(
+                shap_obj[0].base_values,
+                shap_obj[0].values,
+                shap_obj[0].data,
+                shap_obj[0].feature_names,
+                feature_display_range=slice(None, -16, -1),
+                highlight=0,
+                show=False,
+            )
+            plt.title(f"Static EHR modality: RQ={risk_quantile}.")
+            plt.tight_layout()
+            plt.savefig(save_static_path, bbox_inches="tight", dpi=300)
+            plt.close()
+        ### Timeseries modalities
+        if i in [1, 2]:
+            shap_obj[i].data = np.where(shap_obj[i].data == -1, 'Missing', shap_obj[i].data)
+            fig = plt.figure(figsize=figsize)
+            shap.plots.decision(
+                    shap_obj[i].base_values,
+                    shap_obj[i].values,
+                    shap_obj[i].data,
+                    shap_obj[i].feature_names,
+                    feature_display_range=slice(None, -7, -1),
+                    highlight=0,
+                    show=False,
+                    xlim=(-0.05, 0.05)
+                )
+            if i == 1:
+                plt.title(f"TS Vitals modality: RQ={risk_quantile}.")
+            else:
+                plt.title(f"TS Labs modality: RQ={risk_quantile}.")
+            plt.tight_layout()
+            if i == 1:
+                plt.savefig(save_ts0_path, bbox_inches="tight", dpi=300)
+            else:
+                plt.savefig(save_ts1_path, bbox_inches="tight", dpi=300)
+            plt.close()
+        ### Notes modality
+        if i == 3:
+            shap_obj[i].values = np.array([shap_obj[i].values])[0]
+            shap_obj[i].base_values = shap_obj[i].base_values[0]
+            shap_obj[i].data = shap_obj[i].data.astype('O')
+            plot_highlighted_text_with_colorbar(shap_obj[i].values,
+                                                shap_obj[i].data,
+                                                shap_obj[i].base_values,
+                                                save_path=save_nt_path,
+                                                offset_ref=nt_offset_ref)
 
-    shap_obj.values = shap_obj.values.round(3)
-    shap.plots.decision(
-        expected_value,
-        shap_obj.values,
-        shap_obj.data,
-        feature_names,
-        feature_display_range=slice(None, -21, -1),
-        show=False
-    )
-    plt.grid('both')
-    plt.title(f"SHAP Local Importance for subject at risk level {risk_quantile}.")
-    plt.savefig(save_path, bbox_inches="tight", dpi=300)
-    plt.close()
-    print(f"SHAP local-level decision plot saved to {save_path}.")
+    print(f"SHAP local-level decision plots saved to disk.")
 
-
-def get_shap_text_plot(
-    explainer,
-    shap_values,
-    text_data,
-    y_test,
-    y_hat,
-    prob,
-    outcome="In-hospital Death",
-    fusion_type=None,
-    subject_idx: int = 0,
-    risk_quantile: int = 10,
-    save_path=None,
-    verbose=True,
-):
+def plot_highlighted_text_with_colorbar(shap_values, text_tokens, 
+                                        expected_value, figsize=(10, 4), 
+                                        cmap="coolwarm", save_path=None,
+                                        offset_ref=False):
     """
-    Generate a SHAP text plot for the notes modality.
+    Display a highlighted text plot and a colorbar based on SHAP values.
 
-    Parameters:
-    - explainer: The SHAP explainer object.
-    - shap_values: The calculated SHAP values for the text data.
-    - text_data: The input text data for which SHAP values are calculated.
-    - outcome: The outcome being explained (default: 'In-hospital Death').
-    - fusion_type: The fusion method used in the model (default: None).
-    - subject_idx: The index of the subject being explained.
-    - risk_quantile: The risk quantile of the subject.
-    - save_path: Path to save the SHAP text plot.
-    - verbose: Whether to print additional information (default: True).
-
-    Returns:
-    - None: Saves the SHAP text plot to the specified path.
+    Args:
+        shap_values (np.ndarray): SHAP values for each token (1D array).
+        text_tokens (list of str): List of text tokens (words or sentences).
+        expected_value (float): Reference value for colorbar label.
+        figsize (tuple): Figure size.
+        cmap (str): Matplotlib colormap.
+        save_path (str): If provided, saves the plot to this path.
     """
-    if verbose:
-        print(
-            f"Generating SHAP text plot for Subject {subject_idx} in Risk Quantile {risk_quantile}..."
-        )
-    y_test = "Y" if y_test else "N"
-    y_hat = "Y" if y_hat else "N"
-    # Generate the SHAP text plot
-    plt.figure()
-    shap.plots.text(explainer.expected_value, shap_values, text_data, show=False)
-    plt.title(
-        f"SHAP Text Plot For Subject {subject_idx} in Risk Quantile {risk_quantile}: {outcome}, {fusion_type}(notes)."
-    )
-    plt.suptitle(f"Truth: {y_test}, Predict: {y_hat}, Prob: {round(prob, 2)*100}%")
-    plt.savefig(save_path, bbox_inches="tight", dpi=300)
-    plt.close()
+    max_shap = np.max(np.abs(shap_values))
+    # Normalize SHAP values for color mapping
+    if offset_ref:
+        # Center colorbar at expected_value
+        min_shap = expected_value - max_shap
+        #max_shap = expected_value + max_shap
+    else:
+        min_shap = -np.max(np.abs(shap_values))
+        
+    norm = mpl.colors.Normalize(vmin=min_shap, vmax=max_shap)
+    cmap = plt.get_cmap(cmap)
 
-    if verbose:
-        print(f"Text plot saved to {save_path}")
+    fig, ax = plt.subplots(figsize=figsize)
+    ax.axis('off')
+
+    # Prepare text with colored background, handling new lines every 12 words and after every '#' symbol
+    x = 0.01
+    y = 0.95
+    line_height = 0.08
+    max_x = 0.98
+    for token, val in zip(text_tokens, shap_values):
+        words = token.split()
+        word_count = 0
+        token_line = ""
+        for word in words:
+            token_line += word + " "
+            word_count += 1
+            # New line every 10 words
+            if word_count % 10 == 0:
+                # Insert note separator if needed
+                if "<ENDNOTE> <STARTNOTE>" in token_line:
+                    parts = token_line.split("<ENDNOTE> <STARTNOTE>")
+                    for idx, part in enumerate(parts):
+                        if part.strip():
+                            color = cmap(norm(val))
+                            text_width = 0.01 * len(part)
+                            if x + text_width > max_x:
+                                x = 0.01
+                                y -= line_height
+                            ax.text(x, y, part, fontsize=11, va='top', ha='left',
+                                    bbox=dict(facecolor=color, edgecolor='none', boxstyle='round,pad=0.1'))
+                            x += text_width
+                        if idx < len(parts) - 1:
+                            # Add separator and move to new line
+                            x = 0.01
+                            y -= line_height
+                            ax.text(x, y, "------------NEXT NOTE-------------", fontsize=11, va='top', ha='left', color='black')
+                            y -= line_height
+                            x = 0.01
+                    token_line = ""
+                else:
+                    color = cmap(norm(val))
+                    text_width = 0.01 * len(token_line)
+                    if x + text_width > max_x:
+                        x = 0.01
+                        y -= line_height
+                    ax.text(x, y, token_line, fontsize=11, va='top', ha='left',
+                            bbox=dict(facecolor=color, edgecolor='none', boxstyle='round,pad=0.1'))
+                    x = 0.01
+                    y -= line_height
+                    token_line = ""
+            # New line after every '#' symbol in word
+            if '#' in word:
+                color = cmap(norm(val))
+                text_width = 0.01 * len(token_line)
+                if x + text_width > max_x:
+                    x = 0.01
+                    y -= line_height
+                ax.text(x, y, token_line, fontsize=11, va='top', ha='left',
+                        bbox=dict(facecolor=color, edgecolor='none', boxstyle='round,pad=0.1'))
+                x = 0.01
+                y -= line_height
+                token_line = ""
+        if token_line.strip():
+            # Insert note separator if needed
+            if "<ENDNOTE> <STARTNOTE>" in token_line:
+                parts = token_line.split("<ENDNOTE> <STARTNOTE>")
+                for idx, part in enumerate(parts):
+                    if part.strip():
+                        color = cmap(norm(val))
+                        text_width = 0.01 * len(part + " ")
+                        if x + text_width > max_x:
+                            x = 0.01
+                            y -= line_height
+                        ax.text(x, y, part + " ", fontsize=11, va='top', ha='left',
+                                bbox=dict(facecolor=color, edgecolor='none', boxstyle='round,pad=0.1'))
+                        x += text_width
+                    if idx < len(parts) - 1:
+                        x = 0.01
+                        y -= line_height
+                        ax.text(x, y, "------------NEXT NOTE--------------- ", fontsize=11, va='top', ha='left', color='black')
+                        y -= line_height
+                        x = 0.01
+            else:
+                color = cmap(norm(val))
+                text_width = 0.01 * len(token_line + " ")
+                if x + text_width > max_x:
+                    x = 0.01
+                    y -= line_height
+                ax.text(x, y, token_line + " ", fontsize=11, va='top', ha='left',
+                        bbox=dict(facecolor=color, edgecolor='none', boxstyle='round,pad=0.1'))
+                x += text_width
+        else:
+            x = 0.01
+
+    # Draw a bounding box around the text area
+    min_y = y - line_height
+    rect = mpl.patches.FancyBboxPatch(
+        (0, min_y), 1, 0.98-min_y,
+        boxstyle="round,pad=0.01",
+        linewidth=2,
+        edgecolor='black',
+        facecolor='none'
+    )
+    ax.add_patch(rect)
+
+    # Add colorbar at the top and center it
+    sm = mpl.cm.ScalarMappable(cmap=cmap, norm=norm)
+    sm.set_array([])
+    # Set colorbar to cover the full plot width
+    cbar = plt.colorbar(
+        sm, ax=ax, orientation='horizontal',
+        fraction=0.15, pad=0.02, anchor=(0.5, 1.0), location='top'
+    )
+    cbar.set_label(f'SHAP Value (Ref={expected_value:.3f})', fontsize=14, labelpad=10)
+    cbar.ax.xaxis.set_label_position('top')
+    cbar.ax.xaxis.set_ticks_position('top')
+
+    plt.tight_layout()
+    if save_path:
+        plt.savefig(save_path, bbox_inches="tight", dpi=300)
