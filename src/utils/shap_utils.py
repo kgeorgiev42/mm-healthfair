@@ -1,4 +1,5 @@
 import os
+import warnings
 
 import matplotlib.pyplot as plt
 import matplotlib as mpl
@@ -146,7 +147,15 @@ def get_shap_summary_plot(
                 max_display=max_features,
                 show=False,
             )
-    plt.grid('both')
+    if modality == "notes":
+        shap.plots.bar(
+            shap_obj,
+            max_display=max_features,
+            show=False,
+        )
+    
+    if modality != "notes":
+        plt.grid('both', linestyle='--', alpha=0.7)
     if heatmap:
         plt.title(f"Heatmap view for {modality} modality.")
     else:
@@ -180,8 +189,10 @@ def aggregate_ts(data):
     mask = to_agg > -1
     # Set -1 values to np.nan for mean calculation
     to_agg_masked = np.where(mask, to_agg, np.nan)
-    # Compute mean across axis=0, ignoring nan
-    agg_values = np.nanmean(to_agg_masked, axis=0, keepdims=True)
+    # Suppress mean of empty slice warning
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=RuntimeWarning)
+        agg_values = np.nanmean(to_agg_masked, axis=0, keepdims=True)
     agg_values = np.abs(agg_values.reshape(1, -1))
     agg_values = np.where(np.isnan(agg_values), -1, agg_values).round(2)
     return agg_values

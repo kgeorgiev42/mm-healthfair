@@ -366,6 +366,59 @@ if __name__ == "__main__":
                     ),
                     heatmap=args.use_heatmaps,
                 )
+        
+        if 'notes' in modalities:
+            # Collect all static SHAP values into a unified np.array
+            shap_global_values = []
+            actual_values = []
+            notes_test = []
+            feature_names = []
+            notes_ctr = 0
+            for i in range(len(test_ids)):
+                ### Collect raw notes from test samples
+                data_notes = np.array([s[0] for s in emb_dict[test_ids[i]]['notes']])
+                data_notes_tr = []
+                for j in range(len(data_notes)):
+                    ## Trim to max embedding length for BioBERT
+                    if len(data_notes[j]) > 768:
+                        data_notes_tr.append(data_notes[j][:768])
+                    elif len(data_notes[j]) < 3:
+                        continue
+                    else:
+                        data_notes_tr.append(data_notes[j])
+                ### Shorten notes for display purposes
+                notes_test.append(np.array(data_notes_tr))
+                feature_names.extend(np.array([data_notes_tr[j][:75] + '...' for j in range(len(data_notes_tr))]))
+
+            for batch_idx, batch in enumerate(dataloader):
+                for shap_v in shap_dict['batch_' + str(batch_idx)]['notes']:
+                    ### Need to retrieve correct length from original clinical note and filter out batch-wise padded SHAP values
+                    #batch_shap = np.array(shap_dict['batch_' + str(batch_idx)]['notes'][i][:len(notes_test[notes_ctr])]).reshape(1,-1)[0]
+                    batch_shap = np.array(shap_v[0][:len(notes_test[notes_ctr])]).reshape(1,-1)[0]
+                    if len(batch_shap) < 3:
+                        continue
+                    ### Flatten batch_shap and add to global values
+                    shap_global_values.extend(np.array(batch_shap))
+                    notes_ctr += 1
+
+            shap_global_values = np.array(shap_global_values)
+            feature_names = np.array(feature_names) 
+            shap_obj = shap.Explanation(values=shap_global_values, 
+                                        feature_names=feature_names,
+                                        data=None)
+
+            get_shap_summary_plot(
+                shap_obj,
+                fusion_type=fusion_method,
+                modality="notes",
+                outcome=outcomes_disp[outcome_idx],
+                max_features=args.global_max_features,
+                save_path=os.path.join(
+                    exp_path,
+                    f"shap_global_{outcomes[outcome_idx]}_notes_summary.png",
+                ),
+                heatmap=args.use_heatmaps,
+            )
 
     if args.exp_mode == "local":
         print(
