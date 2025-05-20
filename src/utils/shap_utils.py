@@ -206,7 +206,8 @@ def get_shap_local_decision_plot(
     save_ts0_path=None,
     save_ts1_path=None,
     save_nt_path=None,
-    nt_offset_ref=False
+    nt_offset_ref=False,
+    shap_range=None,
 ):
     """
     Generate a SHAP decision plot for tabular and timeseries data.
@@ -235,10 +236,11 @@ def get_shap_local_decision_plot(
                 feature_display_range=slice(None, -16, -1),
                 highlight=0,
                 show=False,
+                xlim=shap_range,
             )
             plt.title(f"Static EHR modality: RQ={risk_quantile}.")
             plt.tight_layout()
-            plt.savefig(save_static_path, bbox_inches="tight", dpi=300)
+            plt.savefig(save_static_path, dpi=300)
             plt.close()
         ### Timeseries modalities
         if i in [1, 2]:
@@ -249,15 +251,16 @@ def get_shap_local_decision_plot(
                     shap_obj[i].values,
                     shap_obj[i].data,
                     shap_obj[i].feature_names,
-                    feature_display_range=slice(None, -7, -1),
+                    feature_display_range=slice(None, -11, -1),
                     highlight=0,
                     show=False,
-                    xlim=(-0.05, 0.05)
+                    xlim=shap_range,
                 )
             if i == 1:
                 plt.title(f"TS Vitals modality: RQ={risk_quantile}.")
             else:
                 plt.title(f"TS Labs modality: RQ={risk_quantile}.")
+                
             plt.tight_layout()
             if i == 1:
                 plt.savefig(save_ts0_path, bbox_inches="tight", dpi=300)
@@ -267,20 +270,20 @@ def get_shap_local_decision_plot(
         ### Notes modality
         if i == 3:
             shap_obj[i].values = np.array([shap_obj[i].values])[0]
-            shap_obj[i].base_values = shap_obj[i].base_values[0]
+            #shap_obj[i].base_values = shap_obj[i].base_values[0]
             shap_obj[i].data = shap_obj[i].data.astype('O')
-            plot_highlighted_text_with_colorbar(shap_obj[i].values,
+            plot_highlighted_text_with_colorbar(shap_obj[i].values.round(3),
                                                 shap_obj[i].data,
                                                 shap_obj[i].base_values,
                                                 save_path=save_nt_path,
-                                                offset_ref=nt_offset_ref)
+                                                shap_range=shap_range)
 
     print(f"SHAP local-level decision plots saved to disk.")
 
 def plot_highlighted_text_with_colorbar(shap_values, text_tokens, 
                                         expected_value, figsize=(10, 4), 
                                         cmap="coolwarm", save_path=None,
-                                        offset_ref=False):
+                                        shap_range=None):
     """
     Display a highlighted text plot and a colorbar based on SHAP values.
 
@@ -292,16 +295,7 @@ def plot_highlighted_text_with_colorbar(shap_values, text_tokens,
         cmap (str): Matplotlib colormap.
         save_path (str): If provided, saves the plot to this path.
     """
-    max_shap = np.max(np.abs(shap_values))
-    # Normalize SHAP values for color mapping
-    if offset_ref:
-        # Center colorbar at expected_value
-        min_shap = expected_value - max_shap
-        #max_shap = expected_value + max_shap
-    else:
-        min_shap = -np.max(np.abs(shap_values))
-        
-    norm = mpl.colors.Normalize(vmin=min_shap, vmax=max_shap)
+    norm = mpl.colors.Normalize(vmin=shap_range[0], vmax=shap_range[1])
     cmap = plt.get_cmap(cmap)
 
     fig, ax = plt.subplots(figsize=figsize)
@@ -319,8 +313,8 @@ def plot_highlighted_text_with_colorbar(shap_values, text_tokens,
         for word in words:
             token_line += word + " "
             word_count += 1
-            # New line every 10 words
-            if word_count % 10 == 0:
+            # New line every 15 words
+            if word_count % 15 == 0:
                 # Insert note separator if needed
                 if "<ENDNOTE> <STARTNOTE>" in token_line:
                     parts = token_line.split("<ENDNOTE> <STARTNOTE>")
@@ -331,7 +325,7 @@ def plot_highlighted_text_with_colorbar(shap_values, text_tokens,
                             if x + text_width > max_x:
                                 x = 0.01
                                 y -= line_height
-                            ax.text(x, y, part, fontsize=11, va='top', ha='left',
+                            ax.text(x, y, part, fontsize=10, va='top', ha='left',
                                     bbox=dict(facecolor=color, edgecolor='none', boxstyle='round,pad=0.1'))
                             x += text_width
                         if idx < len(parts) - 1:
@@ -348,7 +342,7 @@ def plot_highlighted_text_with_colorbar(shap_values, text_tokens,
                     if x + text_width > max_x:
                         x = 0.01
                         y -= line_height
-                    ax.text(x, y, token_line, fontsize=11, va='top', ha='left',
+                    ax.text(x, y, token_line, fontsize=10, va='top', ha='left',
                             bbox=dict(facecolor=color, edgecolor='none', boxstyle='round,pad=0.1'))
                     x = 0.01
                     y -= line_height
@@ -360,7 +354,7 @@ def plot_highlighted_text_with_colorbar(shap_values, text_tokens,
                 if x + text_width > max_x:
                     x = 0.01
                     y -= line_height
-                ax.text(x, y, token_line, fontsize=11, va='top', ha='left',
+                ax.text(x, y, token_line, fontsize=10, va='top', ha='left',
                         bbox=dict(facecolor=color, edgecolor='none', boxstyle='round,pad=0.1'))
                 x = 0.01
                 y -= line_height
@@ -376,13 +370,13 @@ def plot_highlighted_text_with_colorbar(shap_values, text_tokens,
                         if x + text_width > max_x:
                             x = 0.01
                             y -= line_height
-                        ax.text(x, y, part + " ", fontsize=11, va='top', ha='left',
+                        ax.text(x, y, part + " ", fontsize=10, va='top', ha='left',
                                 bbox=dict(facecolor=color, edgecolor='none', boxstyle='round,pad=0.1'))
                         x += text_width
                     if idx < len(parts) - 1:
                         x = 0.01
                         y -= line_height
-                        ax.text(x, y, "------------NEXT NOTE--------------- ", fontsize=11, va='top', ha='left', color='black')
+                        ax.text(x, y, "------------NEXT NOTE---------------", fontsize=11, va='top', ha='left', color='black')
                         y -= line_height
                         x = 0.01
             else:
@@ -391,7 +385,7 @@ def plot_highlighted_text_with_colorbar(shap_values, text_tokens,
                 if x + text_width > max_x:
                     x = 0.01
                     y -= line_height
-                ax.text(x, y, token_line + " ", fontsize=11, va='top', ha='left',
+                ax.text(x, y, token_line + " ", fontsize=10, va='top', ha='left',
                         bbox=dict(facecolor=color, edgecolor='none', boxstyle='round,pad=0.1'))
                 x += text_width
         else:

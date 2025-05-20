@@ -165,6 +165,11 @@ if __name__ == "__main__":
     batch_size = 16
     ### Edit when adding more timeseries measurements
     ts_types = ['ts-vitals', 'ts-labs']
+    ### Local-level setup for extracting risk profile
+    tg_gender = targets['shap_profile']['sex']
+    tg_ms = targets['shap_profile']['marital_status']
+    tg_eth = targets['shap_profile']['ethnicity']
+    tg_insurance = targets['shap_profile']['insurance']
     ### Model-specific setup
     model_path = os.path.join(
         os.path.join(args.model_dir, args.model_path), args.model_path + ".ckpt"
@@ -430,17 +435,13 @@ if __name__ == "__main__":
             for i in range(len(shap_dict)):
                 ids_list = []
                 ctr_list = []
-                for pt in shap_dict['batch_' + str(i)]:
+                for pt in shap_dict['batch_' + str(i)]['static']:
                     ids_list.append(test_ids[p_ctr])
                     ctr_list.append(p_ctr)
                     p_ctr += 1
                 shap_dict['batch_' + str(i)]['p_id'] = ids_list
                 shap_dict['batch_' + str(i)]['ctr'] = ctr_list
-        # Get a random subject in the specified risk group
-        #print(risk_dict.keys())
-        risk_idx = pd.DataFrame({k: v for k, v in risk_dict.items() if k in ['test_ids', 'risk_quantile']})
-        #print(risk_idx)
-        risk_idx = risk_idx[risk_idx['risk_quantile'] == args.local_risk_group]['test_ids'].sample(1, random_state=42).values.tolist()
+
         shap_colnames = get_feature_names(test_set, modalities=modalities)
         ### Get static SHAP values for patient
         static_names = [feature_names.get(k, k) for k in shap_colnames['static']]
@@ -449,12 +450,37 @@ if __name__ == "__main__":
         ### Load in unscaled test data
         ehr_static = pl.read_csv(args.attr_path)
         static_values = encode_categorical_features(pl.DataFrame(ehr_static))
+        ### Extract selected patient profiles
+        static_values = static_values.filter(
+            ((pl.col("gender_F") == 1) if tg_gender == 'F' else (pl.col("gender_F") == 0)) &
+            (pl.col("marital_status_" + str(tg_ms)) == 1) &
+            (pl.col("race_group_" + str(tg_eth)) == 1) &
+            (pl.col("insurance_" + str(tg_insurance)) == 1)
+        )
+        print(static_values.shape)
+        # Get a random subject with the specified risk quantile and attributes
+        risk_idx = pd.DataFrame({k: v for k, v in risk_dict.items() if k in ['test_ids', 'risk_quantile']})
+        risk_idx = risk_idx[risk_idx['risk_quantile'] == args.local_risk_group]
+        print(risk_idx.shape)
+        risk_idx = risk_idx[risk_idx['test_ids'].isin(static_values['subject_id'])]
+        print(risk_idx.shape)
+        risk_idx = risk_idx[risk_idx['test_ids'].isin(test_ids)]
+        print(risk_idx.shape)
+        if len(risk_idx) == 0:
+            print(f"No patients found with risk quantile {args.local_risk_group} with specified attributes.")
+            print("Please provide a different risk quantile or attributes.")
+            sys.exit()
+        ### Randomly sample an individual case
+        risk_idx = risk_idx.sample(n=1, random_state=42)['test_ids'].to_numpy().tolist()
+        print(risk_idx)
         static_values = static_values.filter(
             pl.col("subject_id").is_in(list(map(int, risk_idx)))
         )
         static_values = static_values.select(shap_colnames['static']).to_pandas().to_numpy()
         ### Get multimodal SHAP values for single patient
+        ctr = 0
         for sb in shap_dict.keys():
+            ctr += len(shap_dict[sb]['p_id'])
             if risk_idx[0] not in shap_dict[sb]['p_id']:
                 continue 
             ### Collect Static SHAP values
@@ -485,21 +511,31 @@ if __name__ == "__main__":
                 data_vitals = np.array(aggregate_ts(data_vitals))
                 data_labs = np.array(aggregate_ts(data_labs))
 
+        # Average expected values across modalities
+        shap_expected_ovr = np.mean([shap_expected[0], shap_vitals_expected[0], shap_labs_expected[0], shap_notes_expected[0]], axis=0).round(3)
+        # Merge all four arrays into one unique list and get max
+        merged_shap = np.concatenate([shap_static_values[0], agg_vitals[0], agg_labs[0], shap_notes])
+        # Get max and min SHAP values to create range
+        shap_max_ovr = np.max(merged_shap).round(5)
+        shap_max_ovr = round(max([shap_max_ovr, shap_expected_ovr]), 5) + 0.001
+        shap_min_ovr = np.min(merged_shap).round(5)
+        shap_min_ovr = round(min([shap_min_ovr, shap_expected_ovr]), 5) - 0.001
+        #print(shap_expected_ovr, shap_max_ovr, shap_min_ovr)
         # Generate Explanation objects
-        shap_static_obj = shap.Explanation(values=shap_static_values,
-                                    base_values=shap_expected,
+        shap_static_obj = shap.Explanation(values=np.round(shap_static_values, 5),
+                                    base_values=shap_expected_ovr,
                                     feature_names=static_names,
                                     data=static_values)
-        shap_vitals_obj = shap.Explanation(values=agg_vitals,
-                                    base_values=shap_vitals_expected,
+        shap_vitals_obj = shap.Explanation(values=np.round(agg_vitals, 5),
+                                    base_values=shap_expected_ovr,
                                     feature_names=vitals_names,
                                     data=data_vitals)
-        shap_labs_obj = shap.Explanation(values=agg_labs,
-                                    base_values=shap_labs_expected,
+        shap_labs_obj = shap.Explanation(values=np.round(agg_labs, 5),
+                                    base_values=shap_expected_ovr,
                                     feature_names=lab_names,
                                     data=data_labs)
-        shap_notes_obj = shap.Explanation(values=shap_notes,
-                                    base_values=shap_notes_expected,
+        shap_notes_obj = shap.Explanation(values=np.round(shap_notes, 5),
+                                    base_values=shap_expected_ovr,
                                     feature_names=None,
                                     data=data_notes)
         
@@ -522,5 +558,5 @@ if __name__ == "__main__":
                 exp_path,
                 f"shap_local_{outcomes[outcome_idx]}_notes_text.png",
             ),
-            nt_offset_ref=args.notes_offset_ref,
+            shap_range=(shap_min_ovr, shap_max_ovr),
         )
