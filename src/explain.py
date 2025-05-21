@@ -24,7 +24,8 @@ from utils.shap_utils import (
     get_shap_local_decision_plot,
     get_shap_summary_plot,
     get_shap_values,
-    aggregate_ts
+    aggregate_ts,
+    estimate_mm_summary
 )
 
 if __name__ == "__main__":
@@ -457,22 +458,17 @@ if __name__ == "__main__":
             (pl.col("race_group_" + str(tg_eth)) == 1) &
             (pl.col("insurance_" + str(tg_insurance)) == 1)
         )
-        print(static_values.shape)
         # Get a random subject with the specified risk quantile and attributes
         risk_idx = pd.DataFrame({k: v for k, v in risk_dict.items() if k in ['test_ids', 'risk_quantile']})
         risk_idx = risk_idx[risk_idx['risk_quantile'] == args.local_risk_group]
-        print(risk_idx.shape)
         risk_idx = risk_idx[risk_idx['test_ids'].isin(static_values['subject_id'])]
-        print(risk_idx.shape)
         risk_idx = risk_idx[risk_idx['test_ids'].isin(test_ids)]
-        print(risk_idx.shape)
         if len(risk_idx) == 0:
             print(f"No patients found with risk quantile {args.local_risk_group} with specified attributes.")
             print("Please provide a different risk quantile or attributes.")
             sys.exit()
         ### Randomly sample an individual case
         risk_idx = risk_idx.sample(n=1, random_state=42)['test_ids'].to_numpy().tolist()
-        print(risk_idx)
         static_values = static_values.filter(
             pl.col("subject_id").is_in(list(map(int, risk_idx)))
         )
@@ -486,21 +482,25 @@ if __name__ == "__main__":
             ### Collect Static SHAP values
             pt_idx = shap_dict[sb]['p_id'].index(risk_idx[0])
             static_shap = shap_dict[sb]['static'][pt_idx].reshape(1, -1)
-            shap_expected = shap_dict[sb]['static_expected']
-            shap_static_values = np.array(static_shap)
+            shap_expected = shap_dict[sb]['static_expected'][0]
+            shap_static_values = np.array(static_shap)[0]
             ### Collect and aggregate Timeseries SHAP values
             shap_vitals = np.array(shap_dict[sb]['timeseries']['dynamic0'][pt_idx])
-            shap_vitals_expected = np.array(shap_dict[sb]['timeseries']['dynamic0_expected'])
+            shap_vitals_expected = np.array(shap_dict[sb]['timeseries']['dynamic0_expected'])[0]
             shap_labs = np.array(shap_dict[sb]['timeseries']['dynamic1'][pt_idx])
-            shap_labs_expected = np.array(shap_dict[sb]['timeseries']['dynamic1_expected'])
+            shap_labs_expected = np.array(shap_dict[sb]['timeseries']['dynamic1_expected'])[0]
             ### Collect notes SHAP values
             data_notes = np.array([s[0] for s in emb_dict[risk_idx[0]]['notes']])
             ### Need to retrieve correct length from original clinical note and filter out batch-wise padded SHAP values
             shap_notes = np.array(shap_dict[sb]['notes'][pt_idx][0][:len(data_notes)]).reshape(1,-1)[0]
-            shap_notes_expected = np.array(shap_dict[sb]['notes_expected'])
-            # Use mean aggregation across all timepoints to display importances
-            agg_vitals = np.mean(np.mean(shap_vitals, axis=2), axis=0).reshape(1, -1)
-            agg_labs = np.mean(np.mean(shap_labs, axis=2), axis=0).reshape(1, -1)
+            shap_notes_expected = np.array(shap_dict[sb]['notes_expected'])[0]
+            ### Need to extract SHAP scores from final hidden layer due to LSTM setup
+            ## Here to compute the TS-SHAP values we average pool the SHAP values across hidden units, then sum the importances over each timestep.
+            ## This is an arbitrary approach to generate a single list of SHAP values, there may be other more robust ways.
+            agg_vitals = np.sum(np.mean(shap_vitals, axis=2), axis=0).reshape(1, -1)[0]
+            agg_labs = np.sum(np.mean(shap_labs, axis=2), axis=0).reshape(1, -1)[0]
+            #mm_vitals = np.mean(shap_vitals, axis=2).reshape(1, -1)[0]
+            #mm_labs = np.mean(shap_labs, axis=2).reshape(1, -1)[0]
             pt_batch_idx = int(sb.split('_')[1])
             # Get original data
             for batch_idx, batch in enumerate(dataloader):
@@ -511,16 +511,9 @@ if __name__ == "__main__":
                 data_vitals = np.array(aggregate_ts(data_vitals))
                 data_labs = np.array(aggregate_ts(data_labs))
 
-        # Average expected values across modalities
-        shap_expected_ovr = np.mean([shap_expected[0], shap_vitals_expected[0], shap_labs_expected[0], shap_notes_expected[0]], axis=0).round(3)
-        # Merge all four arrays into one unique list and get max
-        merged_shap = np.concatenate([shap_static_values[0], agg_vitals[0], agg_labs[0], shap_notes])
-        # Get max and min SHAP values to create range
-        shap_max_ovr = np.max(merged_shap).round(5)
-        shap_max_ovr = round(max([shap_max_ovr, shap_expected_ovr]), 5) + 0.001
-        shap_min_ovr = np.min(merged_shap).round(5)
-        shap_min_ovr = round(min([shap_min_ovr, shap_expected_ovr]), 5) - 0.001
-        #print(shap_expected_ovr, shap_max_ovr, shap_min_ovr)
+        shap_mm_scores, shap_expected_ovr, shap_max_ovr, shap_min_ovr = estimate_mm_summary([shap_static_values, agg_vitals, agg_labs, shap_notes],
+                                                                                        [shap_expected, shap_vitals_expected, shap_labs_expected, shap_notes_expected])
+
         # Generate Explanation objects
         shap_static_obj = shap.Explanation(values=np.round(shap_static_values, 5),
                                     base_values=shap_expected_ovr,
@@ -559,4 +552,5 @@ if __name__ == "__main__":
                 f"shap_local_{outcomes[outcome_idx]}_notes_text.png",
             ),
             shap_range=(shap_min_ovr, shap_max_ovr),
+            mm_scores=shap_mm_scores
         )

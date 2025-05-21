@@ -107,6 +107,34 @@ def get_shap_values(model,
 
     return shap_values
 
+def estimate_mm_summary(shap_scores, shap_expected_scores):
+    # Average expected values across modalities
+    shap_expected_ovr = np.mean([shap_expected_scores[0], 
+                                 shap_expected_scores[1], 
+                                 shap_expected_scores[2], 
+                                 shap_expected_scores[3]], 
+                                axis=0).round(3)
+    # Merge all four arrays into one list to get a unified range
+    merged_shap = np.concatenate([shap_scores[0], shap_scores[1], 
+                                  shap_scores[2], shap_scores[3]])
+    # Get max and min SHAP values for valid range
+    shap_max_ovr = np.max(merged_shap).round(5)
+    shap_max_ovr = round(max([shap_max_ovr, shap_expected_ovr]), 5) + 0.01
+    shap_min_ovr = np.min(merged_shap).round(5)
+    shap_min_ovr = round(min([shap_min_ovr, shap_expected_ovr]), 5) - 0.01
+    # Estimate absolute sum of SHAP values for each modality
+    shap_sum_static = np.sum(np.abs(shap_scores[0]))
+    shap_sum_ts = np.sum(np.abs(shap_scores[1])) + np.sum(np.abs(shap_scores[2]))
+    shap_sum_notes = np.sum(np.abs(shap_scores[3]))
+    shap_denom = shap_sum_static + shap_sum_ts + shap_sum_notes
+    # Estimate multimodal degrees of importance (MM-SHAP)
+    shap_static_degree = round((shap_sum_static / shap_denom) * 100, 2)
+    shap_ts_degree = round((shap_sum_ts / shap_denom) * 100, 2)
+    shap_notes_degree = round((shap_sum_notes / shap_denom) * 100, 2)
+    shap_mm_scores = [shap_static_degree, shap_ts_degree, shap_notes_degree]
+
+    return shap_mm_scores, shap_expected_ovr, shap_max_ovr, shap_min_ovr
+
 
 def get_shap_summary_plot(
     shap_obj,
@@ -206,8 +234,8 @@ def get_shap_local_decision_plot(
     save_ts0_path=None,
     save_ts1_path=None,
     save_nt_path=None,
-    nt_offset_ref=False,
     shap_range=None,
+    mm_scores=None,
 ):
     """
     Generate a SHAP decision plot for tabular and timeseries data.
@@ -238,7 +266,7 @@ def get_shap_local_decision_plot(
                 show=False,
                 xlim=shap_range,
             )
-            plt.title(f"Static EHR modality: RQ={risk_quantile}.")
+            plt.title(f"Static EHR modality (RQ={risk_quantile}, TAB-SHAP={mm_scores[0]}%).")
             plt.tight_layout()
             plt.savefig(save_static_path, dpi=300)
             plt.close()
@@ -257,9 +285,9 @@ def get_shap_local_decision_plot(
                     xlim=shap_range,
                 )
             if i == 1:
-                plt.title(f"TS Vitals modality: RQ={risk_quantile}.")
+                plt.title(f"TS Vitals modality (RQ={risk_quantile}, TS-SHAP={mm_scores[1]}%).")
             else:
-                plt.title(f"TS Labs modality: RQ={risk_quantile}.")
+                plt.title(f"TS Labs modality (RQ={risk_quantile}, TS-SHAP={mm_scores[1]}%).")
                 
             plt.tight_layout()
             if i == 1:
@@ -275,13 +303,15 @@ def get_shap_local_decision_plot(
             plot_highlighted_text_with_colorbar(shap_obj[i].values.round(3),
                                                 shap_obj[i].data,
                                                 shap_obj[i].base_values,
+                                                mm_scores[2],
                                                 save_path=save_nt_path,
                                                 shap_range=shap_range)
 
     print(f"SHAP local-level decision plots saved to disk.")
 
 def plot_highlighted_text_with_colorbar(shap_values, text_tokens, 
-                                        expected_value, figsize=(10, 4), 
+                                        expected_value, mm_score,
+                                        figsize=(10, 4), 
                                         cmap="coolwarm", save_path=None,
                                         shap_range=None):
     """
@@ -410,7 +440,7 @@ def plot_highlighted_text_with_colorbar(shap_values, text_tokens,
         sm, ax=ax, orientation='horizontal',
         fraction=0.15, pad=0.02, anchor=(0.5, 1.0), location='top'
     )
-    cbar.set_label(f'SHAP Value (Ref={expected_value:.3f})', fontsize=14, labelpad=10)
+    cbar.set_label(f'SHAP Values (Ref={expected_value:.3f}, T-SHAP={mm_score}%)', fontsize=14, labelpad=10)
     cbar.ax.xaxis.set_label_position('top')
     cbar.ax.xaxis.set_ticks_position('top')
 
