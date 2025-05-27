@@ -3,7 +3,7 @@ fusion_method = 'concat'
 st_first = true
 
 [data]
-batch_size = 128
+batch_size = 16
 num_workers = 0
 modalities = ['static', 'timeseries', 'notes']
 
@@ -11,3 +11,4 @@ modalities = ['static', 'timeseries', 'notes']
 epochs = 60
 learning_rate = 1e-3
 early_stopping = 15
+adv_lambda = 0.1

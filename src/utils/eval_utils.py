@@ -462,7 +462,9 @@ def rank_prediction_quantiles(
             plt.xlabel("Risk quantile")
             plt.ylabel(f"Distribution across {disp}")
             plt.tight_layout()
-            plt.savefig(f"{output_path}_by_{attr}.png")
-            print(f"Risk stratification plot saved to {output_path}_by_{attr}.png")
+
+            tg_path = output_path.split(".png")
+            plt.savefig(f"{tg_path[0]}_by_{attr}.png")
+            print(f"Risk stratification plot saved to {tg_path[0]}_by_{attr}.png")
 
     return res_dict

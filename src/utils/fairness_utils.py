@@ -289,7 +289,7 @@ def get_fairness_summary(
     for i, (attr, label) in enumerate(zip(attributes, attribute_labels, strict=False)):
         ax = axes[i]
         x = np.arange(len(metrics))  # Positions for metrics
-        width = 0.2  # Width of each bar
+        width = 0.15  # Width of each bar
 
         # Plot bars for each model
         for j, model in enumerate(models):

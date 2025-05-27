@@ -54,8 +54,20 @@ class Gate(nn.Module):
         output = self.dropout(self.norm(output)).squeeze()
         return output
 
+### Adversarial debiasing component for main model using Gradient Reversal Layer
+## Used to restrict the main model from learning sensitive attributes
+class GradientReversalFunction(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, x, lambda_):
+        ctx.lambda_ = lambda_
+        return x.view_as(x)
+    @staticmethod
+    def backward(ctx, grad_output):
+        return grad_output.neg() * ctx.lambda_, None
 
-# lightning.LightningModules
+def grad_reverse(x, lambda_=1.0):
+    return GradientReversalFunction.apply(x, lambda_)
+
 class MMModel(L.LightningModule):
     def __init__(
         self,
@@ -75,6 +87,8 @@ class MMModel(L.LightningModule):
         modalities=None,
         with_packed_sequences=False,
         dataset=None,
+        sensitive_attr_ids=None,  # list of indices in static features
+        adv_lambda=0.0,        # strength of adversarial penalty
     ):
         super().__init__()
         self.save_hyperparameters()
@@ -84,6 +98,9 @@ class MMModel(L.LightningModule):
         self.with_notes = "notes" in self.modalities
         self.fusion_method = fusion_method
         self.st_first = st_first
+        self.st_only = not self.with_ts and not self.with_notes
+        self.ts_only = not self.with_static and not self.with_notes
+        self.nt_only = not self.with_static and not self.with_ts
 
         # Static embedding
         self.embed_static = (
@@ -167,9 +184,38 @@ class MMModel(L.LightningModule):
         self.f1 = torchmetrics.F1Score(task="binary")
         self.ap = torchmetrics.AveragePrecision(task="binary")
         self.with_packed_sequences = with_packed_sequences
+        self.sensitive_attr_ids = sensitive_attr_ids or []
+        self.adv_lambda = adv_lambda
+
+        # Adversarial heads for each sensitive attribute (binary classification)
+        if self.sensitive_attr_ids:
+            adv_in_dim = st_embed_dim if self.with_static else 0
+            if fusion_method == "concat":
+                adv_in_dim = st_embed_dim + (num_ts * ts_embed_dim) + nt_embed_dim
+            elif fusion_method == "mag" and self.with_ts and self.with_static:
+                adv_in_dim = st_embed_dim if self.st_first else ts_embed_dim
+            elif self.with_static:
+                adv_in_dim = st_embed_dim
+            elif self.with_ts:
+                adv_in_dim = num_ts * ts_embed_dim
+            elif self.with_notes:
+                adv_in_dim = nt_embed_dim
+            self.adv_heads = nn.ModuleList([
+                nn.Sequential(
+                    nn.Linear(adv_in_dim, adv_in_dim // 2),
+                    nn.ReLU(),
+                    nn.Linear(adv_in_dim // 2, 1)
+                ) for _ in self.sensitive_attr_ids
+            ])
+            self.adv_criterion = torch.nn.BCEWithLogitsLoss()
+        else:
+            self.adv_heads = None
 
     def prepare_batch(self, batch):
-        s, y, d, lengths, n = batch[0], batch[1], batch[2], batch[3], batch[4]
+        if not self.st_only:
+          s, y, d, lengths, n = batch[0], batch[1], batch[2], batch[3], batch[4]
+        else:
+          s, y, d, lengths, n = batch[0], batch[1], None, None, None
         st_embed = self.embed_static(s) if self.with_static else None
         ts_embed = (
             [
@@ -200,25 +246,61 @@ class MMModel(L.LightningModule):
                 else self.fuse(*ts_embed, st_embed)
             )
         else:
-            out = (
-                st_embed
-                or torch.cat([t.squeeze() for t in ts_embed], dim=-1)
-                or nt_embed
-            ).squeeze()
+          if self.st_only:
+            out = st_embed.squeeze()
+          elif self.ts_only:
+            out = torch.cat(ts_embed, dim=-1).squeeze()
+          elif self.nt_only:
+            out = nt_embed.squeeze()
 
         x_hat = self.fc(out)
-        return x_hat.unsqueeze(0) if len(x_hat.shape) == 1 else x_hat, y
+        # Return embeddings for adversarial loss if needed
+        return (x_hat.unsqueeze(0) if len(x_hat.shape) == 1 else x_hat, y, out, s) if self.adv_heads else (x_hat.unsqueeze(0) if len(x_hat.shape) == 1 else x_hat, y)
+
 
     def training_step(self, batch, batch_idx):
         # training_step defines the train loop.
         # it is independent of forward
-        x_hat, y = self.prepare_batch(batch)  # logit
+        if self.adv_heads:
+            x_hat, y, rep, s = self.prepare_batch(batch)
+        else:
+            x_hat, y = self.prepare_batch(batch)
         y_hat = torch.sigmoid(x_hat)  # prob
         loss = self.criterion(x_hat, y)
         accuracy = self.acc(y_hat, y)
         auc = self.auc(y_hat, y)
         f1 = self.f1(y_hat, y)
         ap = self.ap(y_hat, y.long())
+
+        # Adversarial loss
+        if self.adv_heads and self.adv_lambda > 0:
+            adv_loss = 0
+            # Access sensitive attributes from the unpacked static data 's'
+            if s is not None:
+                for i, idx in enumerate(self.sensitive_attr_ids):
+                    # Ensure index 'idx' is within the bounds of the static data tensor
+                    if idx < s.size(-1):
+                        # Assuming s is batch_size x static_features
+                        sensitive_label = s[:, :, idx].float().view(-1, 1)
+                        adv_input = grad_reverse(rep, self.adv_lambda)
+                        adv_pred = self.adv_heads[i](adv_input)
+                        adv_loss += self.adv_criterion(adv_pred, sensitive_label)
+
+                if len(self.sensitive_attr_ids) > 0:
+                     adv_loss = adv_loss / len(self.sensitive_attr_ids)
+                     loss = loss + self.adv_lambda * adv_loss
+                     self.log("adv_loss",
+                             adv_loss,
+                             prog_bar=True,
+                             on_epoch=True,
+                             on_step=False,
+                             batch_size=len(y))
+                else:
+                     # No sensitive attributes configured, no adversarial loss
+                     pass
+            else:
+                # print("Warning: Adversarial heads defined but static data 's' is None.")
+                pass # Adversarial heads are defined but static data is not available
 
         self.log(
             "train_loss",
@@ -262,8 +344,13 @@ class MMModel(L.LightningModule):
         )
         return loss
 
+
     def validation_step(self, batch, batch_idx):
-        x_hat, y = self.prepare_batch(batch)
+        # Do not penalize adversarial loss in validation
+        if self.adv_heads:
+            x_hat, y, _, _ = self.prepare_batch(batch) # Still unpack all returned values
+        else:
+            x_hat, y = self.prepare_batch(batch)
         y_hat = torch.sigmoid(x_hat)
         loss = self.criterion(x_hat, y)
         accuracy = self.acc(y_hat, y)
@@ -277,7 +364,10 @@ class MMModel(L.LightningModule):
         self.log("val_ap", ap, prog_bar=True, batch_size=len(y))
 
     def predict_step(self, batch):
-        x_hat, y = self.prepare_batch(batch)
+        if self.adv_heads:
+            x_hat, y, _, _ = self.prepare_batch(batch)
+        else:
+            x_hat, y = self.prepare_batch(batch)
         y_hat = torch.sigmoid(x_hat)
         return y_hat, y
 
@@ -285,6 +375,7 @@ class MMModel(L.LightningModule):
         # optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr, weight_decay=1e-4)
         optimizer = torch.optim.SGD(self.parameters(), lr=self.lr, weight_decay=1e-4)
         # optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
+        optimizer = torch.optim.SGD(self.parameters(), lr=self.lr)
         scheduler = ReduceLROnPlateau(optimizer, mode="min", patience=5)
         return [optimizer], [
             {"scheduler": scheduler, "monitor": "val_loss", "interval": "epoch"}
@@ -301,7 +392,6 @@ class MMModel(L.LightningModule):
             torch.Tensor: Class weights for the positive class.
         """
         labels = []
-        # print(dataset[0])
         for i in range(len(dataset)):  # Assuming dataset returns (data, label, ...)
             labels.append(
                 dataset[i][1].item()
@@ -317,7 +407,6 @@ class MMModel(L.LightningModule):
         pos_weight = negative_samples / positive_samples
         print(f"Adjusting positive class weight to: {round(pos_weight, 3)}")
         return torch.tensor(pos_weight, dtype=torch.float32)
-
 
 class LitLSTM(L.LightningModule):
     """LSTM using time-series data only.

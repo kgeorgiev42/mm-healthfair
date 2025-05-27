@@ -76,6 +76,11 @@ if __name__ == "__main__":
         help="Whether to use class weights for training. Defaults to False.",
     )
     parser.add_argument(
+        "--use_debiasing",
+        action="store_true",
+        help="Whether to use adversarial debiasing to penalize the model's decisions if influenced by sensitive attributes. Target attribute indices in dictionary can be defined in dbindices within targets.toml. Defaults to False.",
+    )
+    parser.add_argument(
         "--project",
         type=str,
         default="nhs-mm-healthfair",
@@ -100,13 +105,17 @@ if __name__ == "__main__":
     es = config["train"]["early_stopping"]
     num_workers = config["data"]["num_workers"]
     fusion_method = config["model"]["fusion_method"]
+    ### Metadata for adversarial debiasing
+    debiasing = args.use_debiasing
+    adv_lambda = config["train"]["adv_lambda"] if debiasing else 0.0
+    db_ids = targets["attributes"]["dbindices"] if debiasing else None
     # overrides to True if not using mag fusion method
     ### Modality-specific config
     st_first = config["model"]["st_first"] if fusion_method == "mag" else True
     modalities = config["data"]["modalities"]
     with_ts = True if "timeseries" in modalities else False
     static_only = True if (len(modalities) == 1) and ("static" in modalities) else False
-    with_notes = True if "notes" in modalities else False
+    with_notes = True ### Text modality is required to construct the data batches but is left out when not used for training.
     ### General setup
     outcomes = targets["outcomes"]["labels"]
     outcomes_disp = targets["outcomes"]["display"]
@@ -125,6 +134,7 @@ if __name__ == "__main__":
     )
     print(f"Modalities used: {modalities}")
     print(f"Fusion method: {fusion_method}")
+    print(f"With adversarial debiasing: {debiasing}")
     print("------------------------------------------")
     L.seed_everything(0)
 
@@ -236,6 +246,8 @@ if __name__ == "__main__":
         dataset=training_set
         if args.use_class_weights
         else None,  # Pass in dataset for adjusting class weights
+        sensitive_attr_ids=db_ids,
+        adv_lambda=adv_lambda,
     )
 
     # trainer

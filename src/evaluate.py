@@ -32,28 +32,28 @@ if __name__ == "__main__":
         "data_path",
         type=str,
         help="Path to the pickled data dictionary generated from prepare_data.py.",
-        default="../outputs/processed_data/mmfair_feat.pkl",
+        default="../outputs/prep_data/mmfair_feat.pkl",
     )
     parser.add_argument(
         "--col_path",
         "-p",
         type=str,
         help="Path to the pickled column dictionary generated from prepare_data.py.",
-        default="../outputs/processed_data/mmfair_cols.pkl",
+        default="../outputs/prep_data/mmfair_cols.pkl",
     )
     parser.add_argument(
         "--ids_path",
         "-i",
         type=str,
         help="Directory containing test ids.",
-        default="../outputs/processed_data",
+        default="../outputs/prep_data",
     )
     parser.add_argument(
         "--attr_path",
         "-a",
         type=str,
         help="Directory containing attributes metadata (original ehr_static.csv).",
-        default="../outputs/sample_data/ehr_static.csv",
+        default="../outputs/ext_data/ehr_static.csv",
     )
     parser.add_argument(
         "--eval_path",
@@ -152,9 +152,9 @@ if __name__ == "__main__":
         with_notes = True if "notes" in modalities else False
         fusion_method = "None"
         if "mag" in args.model_path:
-            fusion_method = "EF-mag"
+            fusion_method = "IF-mag"
         elif "concat" in args.model_path:
-            fusion_method = "EF-concat"
+            fusion_method = "IF-concat"
 
     ### General setup
     outcomes = targets["outcomes"]["labels"]
@@ -222,10 +222,6 @@ if __name__ == "__main__":
         print(f"No model found at {model_path}. Exiting..")
         sys.exit()
 
-    if (len(glob.glob(loss_path)) == 0) and (not args.group_models):
-        print(f"No losses.csv found at {model_path}. Exiting..")
-        sys.exit()
-
     test_ids = (
         pl.read_csv(os.path.join(args.ids_path, "testing_ids_" + args.outcome + ".csv"))
         .select("subject_id")
@@ -272,7 +268,12 @@ if __name__ == "__main__":
     if not os.path.exists(eval_path):
         os.makedirs(eval_path)
 
-    plot_learning_curve(loss_path, output_path=f"{eval_path}/lc_{args.model_path}.png")
+    if (len(glob.glob(loss_path)) != 0) and (not args.group_models):
+        plot_learning_curve(loss_path, output_path=f"{eval_path}/lc_{args.model_path}.png")
+    else:
+        print(
+            f"No losses.csv found at {loss_path}. Skipping learning curve plot for {args.model_path}."
+        )
     print("------------------------------------------")
     print("ROC performance report:")
     print("------------------------------------------")
