@@ -234,7 +234,8 @@ if __name__ == "__main__":
         if not os.path.exists(args.attr_path):
             print("Attributes metadata not found. Exiting...")
             sys.exit()
-        ehr_static = pl.read_csv(args.attr_path).to_pandas()
+        
+    ehr_static = pl.read_csv(args.attr_path).to_pandas()
 
     test_set = MIMIC4Dataset(
         args.data_path,

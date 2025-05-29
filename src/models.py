@@ -101,6 +101,7 @@ class MMModel(L.LightningModule):
         self.st_only = not self.with_ts and not self.with_notes
         self.ts_only = not self.with_static and not self.with_notes
         self.nt_only = not self.with_static and not self.with_ts
+        self.st_ts = self.with_static and self.with_ts and not self.with_notes
 
         # Static embedding
         self.embed_static = (
@@ -212,10 +213,15 @@ class MMModel(L.LightningModule):
             self.adv_heads = None
 
     def prepare_batch(self, batch):
-        if not self.st_only:
-          s, y, d, lengths, n = batch[0], batch[1], batch[2], batch[3], batch[4]
-        else:
+        ### Unpack batch based on the available modalities
+        if self.st_only:
           s, y, d, lengths, n = batch[0], batch[1], None, None, None
+        elif self.st_ts or self.ts_only:
+          s, y, d, lengths, n = batch[0], batch[1], batch[2], batch[3], None
+        else:
+          s, y, d, lengths, n = batch[0], batch[1], batch[2], batch[3], batch[4]
+          
+
         st_embed = self.embed_static(s) if self.with_static else None
         ts_embed = (
             [
