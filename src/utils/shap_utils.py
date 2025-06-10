@@ -23,23 +23,23 @@ def get_feature_names(test_set, modalities):
     for modality_type in modalities:
         if modality_type == "static":
             feature_names = test_set.get_feature_list()
-            fn_map['static'] = feature_names
+            fn_map["static"] = feature_names
         elif modality_type == "timeseries":
-            #print(test_set.col_dict)
+            # print(test_set.col_dict)
             feature_names = test_set.get_feature_list("dynamic0")
-            fn_map['ts-vitals'] = feature_names
+            fn_map["ts-vitals"] = feature_names
             feature_names = test_set.get_feature_list("dynamic1")
-            fn_map['ts-labs'] = feature_names
+            fn_map["ts-labs"] = feature_names
 
     return fn_map
+
 
 class ModelWrapper(torch.nn.Module):
     """
     A wrapper around the model to ensure scalar outputs for SHAP.
     """
-    def __init__(self, model, modality,
-                 total_dim, target_size,
-                 ts_ind=None):
+
+    def __init__(self, model, modality, total_dim, target_size, ts_ind=None):
         super().__init__()
         self.model = model
         self.modality = modality
@@ -67,51 +67,70 @@ class ModelWrapper(torch.nn.Module):
             return embed
         return self.fc(embed)
 
-def get_shap_values(model, 
-                    batch, 
-                    device,
-                    num_ts,
-                    modalities):
+
+def get_shap_values(model, batch, device, num_ts, modalities):
     """
     Compute SHAP values for each modality using the model's prepare_batch method.
     """
     s, d, _, n = batch[0], batch[2], batch[3], batch[4]
     ts_data = {}
     for i in range(num_ts):
-        ts_data['dynamic' + str(i)] = d[i]
+        ts_data["dynamic" + str(i)] = d[i]
     shap_values = {}
 
     if "static" in modalities:
-        wrapper_static = ModelWrapper(model, "static", total_dim=64, target_size=1).to(device)
+        wrapper_static = ModelWrapper(model, "static", total_dim=64, target_size=1).to(
+            device
+        )
         explainer_static = shap.DeepExplainer(wrapper_static, s.to(device))
-        shap_values["static"] = explainer_static.shap_values(s.to(device), check_additivity=False)
+        shap_values["static"] = explainer_static.shap_values(
+            s.to(device), check_additivity=False
+        )
         shap_values["static_expected"] = explainer_static.expected_value[0]
     if "timeseries" in modalities:
         ts_shap_values = {}
         for i in range(num_ts):
-            wrapper_ts = ModelWrapper(model, "timeseries", total_dim=128, target_size=1, ts_ind=i).to(device)
-            explainer_ts = shap.DeepExplainer(wrapper_ts, ts_data['dynamic' + str(i)].to(device))
-            ts_shap_values['dynamic' + str(i)] = explainer_ts.shap_values(ts_data['dynamic' + str(i)].to(device), check_additivity=False)
-            ts_shap_values['dynamic' + str(i) + "_expected"] = np.array([np.mean(explainer_ts.expected_value)])
+            wrapper_ts = ModelWrapper(
+                model, "timeseries", total_dim=128, target_size=1, ts_ind=i
+            ).to(device)
+            explainer_ts = shap.DeepExplainer(
+                wrapper_ts, ts_data["dynamic" + str(i)].to(device)
+            )
+            ts_shap_values["dynamic" + str(i)] = explainer_ts.shap_values(
+                ts_data["dynamic" + str(i)].to(device), check_additivity=False
+            )
+            ts_shap_values["dynamic" + str(i) + "_expected"] = np.array(
+                [np.mean(explainer_ts.expected_value)]
+            )
         shap_values["timeseries"] = ts_shap_values
     if "notes" in modalities:
-        wrapper_notes = ModelWrapper(model, "notes", total_dim=64, target_size=1).to(device)
+        wrapper_notes = ModelWrapper(model, "notes", total_dim=64, target_size=1).to(
+            device
+        )
         explainer_notes = shap.DeepExplainer(wrapper_notes, n.to(device))
-        shap_values["notes"] = explainer_notes.shap_values(n.to(device), check_additivity=False)
+        shap_values["notes"] = explainer_notes.shap_values(
+            n.to(device), check_additivity=False
+        )
         shap_values["notes_expected"] = explainer_notes.expected_value[0]
 
     return shap_values
 
+
 def estimate_mm_summary(shap_scores, shap_expected_scores):
     # Average expected values across modalities
-    shap_expected_ovr = np.mean([shap_expected_scores[0], 
-                                 shap_expected_scores[1], 
-                                 shap_expected_scores[2], 
-                                 shap_expected_scores[3]], 
-                                axis=0).round(3)
+    shap_expected_ovr = np.mean(
+        [
+            shap_expected_scores[0],
+            shap_expected_scores[1],
+            shap_expected_scores[2],
+            shap_expected_scores[3],
+        ],
+        axis=0,
+    ).round(3)
     # Merge all four arrays into one list to get a unified range
-    merged_shap = np.concatenate([shap_scores[0], shap_scores[1], 
-                                  shap_scores[2], shap_scores[3]])
+    merged_shap = np.concatenate(
+        [shap_scores[0], shap_scores[1], shap_scores[2], shap_scores[3]]
+    )
     # Get max and min SHAP values for valid range
     shap_max_ovr = np.max(merged_shap).round(5)
     shap_max_ovr = round(max([shap_max_ovr, shap_expected_ovr]), 5) + 0.01
@@ -158,10 +177,7 @@ def get_shap_summary_plot(
         if heatmap:
             shap_obj.values = shap_obj.values.round(3)
             shap.plots.heatmap(
-                shap_obj,
-                max_display=max_features,
-                plot_width=9,
-                show=False
+                shap_obj, max_display=max_features, plot_width=9, show=False
             )
         else:
             shap.plots.beeswarm(
@@ -176,16 +192,19 @@ def get_shap_summary_plot(
             max_display=max_features,
             show=False,
         )
-    
+
     if modality != "notes":
-        plt.grid('both', linestyle='--', alpha=0.7)
+        plt.grid("both", linestyle="--", alpha=0.7)
     if heatmap:
         plt.title(f"Heatmap view for {modality} modality.")
     else:
-        plt.title(f"SHAP Global Importance for {modality} modality: {outcome}, {fusion_type}.")
+        plt.title(
+            f"SHAP Global Importance for {modality} modality: {outcome}, {fusion_type}."
+        )
     plt.savefig(save_path, bbox_inches="tight", dpi=300)
     plt.close()
     print(f"SHAP summary plot for {modality} modality saved to {save_path}.")
+
 
 def aggregate_ts(data):
     """
@@ -243,16 +262,18 @@ def get_shap_local_decision_plot(
     notes_order = 3
     # Set format for SHAP values
     for i in range(len(shap_obj)):
-        #shap_obj[i].values = shap_obj[i].values.round(6)
+        # shap_obj[i].values = shap_obj[i].values.round(6)
         shap_obj[i].base_values = shap_obj[i].base_values.round(3)
         if i in [1, 2]:
             shap_obj[i].data = shap_obj[i].data.round(2)
-        #print(max(shap_obj[i][0].values.round(3)), min(shap_obj[i][0].values.round(3)))
+        # print(max(shap_obj[i][0].values.round(3)), min(shap_obj[i][0].values.round(3)))
         ### Static EHR modality
         if i == 0:
             plt.figure(figsize=figsize)
-            shap_obj[i].data = np.where(shap_obj[i].data == 0, 'No', shap_obj[i].data)
-            shap_obj[i].data = np.where(shap_obj[i].data == '1', 'Yes', shap_obj[i].data)
+            shap_obj[i].data = np.where(shap_obj[i].data == 0, "No", shap_obj[i].data)
+            shap_obj[i].data = np.where(
+                shap_obj[i].data == "1", "Yes", shap_obj[i].data
+            )
             ## Static EHR modality
             shap.plots.decision(
                 shap_obj[0].base_values,
@@ -270,23 +291,29 @@ def get_shap_local_decision_plot(
             plt.close()
         ### Timeseries modalities
         if i in ts_order:
-            shap_obj[i].data = np.where(shap_obj[i].data == -1, 'Missing', shap_obj[i].data)
+            shap_obj[i].data = np.where(
+                shap_obj[i].data == -1, "Missing", shap_obj[i].data
+            )
             plt.figure(figsize=figsize)
             shap.plots.decision(
-                    shap_obj[i].base_values,
-                    shap_obj[i].values,
-                    shap_obj[i].data,
-                    shap_obj[i].feature_names,
-                    feature_display_range=slice(None, -11, -1),
-                    highlight=0,
-                    show=False,
-                    xlim=shap_range,
-                )
+                shap_obj[i].base_values,
+                shap_obj[i].values,
+                shap_obj[i].data,
+                shap_obj[i].feature_names,
+                feature_display_range=slice(None, -11, -1),
+                highlight=0,
+                show=False,
+                xlim=shap_range,
+            )
             if i == 1:
-                plt.title(f"TS Vitals modality (RQ={risk_quantile}, TS-SHAP={mm_scores[1]}%).")
+                plt.title(
+                    f"TS Vitals modality (RQ={risk_quantile}, TS-SHAP={mm_scores[1]}%)."
+                )
             else:
-                plt.title(f"TS Labs modality (RQ={risk_quantile}, TS-SHAP={mm_scores[1]}%).")
-                
+                plt.title(
+                    f"TS Labs modality (RQ={risk_quantile}, TS-SHAP={mm_scores[1]}%)."
+                )
+
             plt.tight_layout()
             if i == 1:
                 plt.savefig(save_ts0_path, bbox_inches="tight", dpi=300)
@@ -296,34 +323,46 @@ def get_shap_local_decision_plot(
         ### Notes modality
         if i == notes_order:
             shap_obj[i].values = np.array([shap_obj[i].values])[0]
-            #shap_obj[i].base_values = shap_obj[i].base_values[0]
-            shap_obj[i].data = shap_obj[i].data.astype('O')
-            plot_highlighted_text_with_colorbar(shap_obj[i].values.round(3),
-                                                shap_obj[i].data,
-                                                shap_obj[i].base_values,
-                                                mm_scores[2],
-                                                save_path=save_nt_path,
-                                                shap_range=shap_range)
+            # shap_obj[i].base_values = shap_obj[i].base_values[0]
+            shap_obj[i].data = shap_obj[i].data.astype("O")
+            plot_highlighted_text_with_colorbar(
+                shap_obj[i].values.round(3),
+                shap_obj[i].data,
+                shap_obj[i].base_values,
+                mm_scores[2],
+                save_path=save_nt_path,
+                shap_range=shap_range,
+            )
 
     print("SHAP local-level decision plots saved to disk.")
+
 
 def _draw_token(ax, text, x, y, color, max_x, line_height):
     text_width = 0.01 * len(text)
     if x + text_width > max_x:
         x = 0.01
         y -= line_height
-    ax.text(x, y, text, fontsize=10, va='top', ha='left',
-            bbox=dict(facecolor=color, edgecolor='none', boxstyle='round,pad=0.1'))
+    ax.text(
+        x,
+        y,
+        text,
+        fontsize=10,
+        va="top",
+        ha="left",
+        bbox=dict(facecolor=color, edgecolor="none", boxstyle="round,pad=0.1"),
+    )
     x += text_width
     return x, y
+
 
 def _draw_next_note(ax, x, y, line_height, note_text):
     x = 0.01
     y -= line_height
-    ax.text(x, y, note_text, fontsize=11, va='top', ha='left', color='black')
+    ax.text(x, y, note_text, fontsize=11, va="top", ha="left", color="black")
     y -= line_height
     x = 0.01
     return x, y
+
 
 def _process_token_line(ax, token_line, val, cmap, norm, x, y, max_x, line_height):
     if "<ENDNOTE> <STARTNOTE>" in token_line:
@@ -333,7 +372,9 @@ def _process_token_line(ax, token_line, val, cmap, norm, x, y, max_x, line_heigh
                 color = cmap(norm(val))
                 x, y = _draw_token(ax, part, x, y, color, max_x, line_height)
             if idx < len(parts) - 1:
-                x, y = _draw_next_note(ax, x, y, line_height, "------------NEXT NOTE-------------")
+                x, y = _draw_next_note(
+                    ax, x, y, line_height, "------------NEXT NOTE-------------"
+                )
         token_line = ""
     else:
         color = cmap(norm(val))
@@ -343,7 +384,10 @@ def _process_token_line(ax, token_line, val, cmap, norm, x, y, max_x, line_heigh
         token_line = ""
     return x, y, token_line
 
-def _render_highlighted_text(ax, shap_values, text_tokens, norm, cmap, line_height=0.08, max_x=0.98):
+
+def _render_highlighted_text(
+    ax, shap_values, text_tokens, norm, cmap, line_height=0.08, max_x=0.98
+):
     """
     Helper function to render highlighted text with color background.
     Refactored to reduce branches and statements.
@@ -359,9 +403,11 @@ def _render_highlighted_text(ax, shap_values, text_tokens, norm, cmap, line_heig
             word_count += 1
             # New line every 15 words
             if word_count % 15 == 0:
-                x, y, token_line = _process_token_line(ax, token_line, val, cmap, norm, x, y, max_x, line_height)
+                x, y, token_line = _process_token_line(
+                    ax, token_line, val, cmap, norm, x, y, max_x, line_height
+                )
             # New line after every '#' symbol in word
-            if '#' in word:
+            if "#" in word:
                 color = cmap(norm(val))
                 x, y = _draw_token(ax, token_line, x, y, color, max_x, line_height)
                 x = 0.01
@@ -373,21 +419,37 @@ def _render_highlighted_text(ax, shap_values, text_tokens, norm, cmap, line_heig
                 for idx, part in enumerate(parts):
                     if part.strip():
                         color = cmap(norm(val))
-                        x, y = _draw_token(ax, part + " ", x, y, color, max_x, line_height)
+                        x, y = _draw_token(
+                            ax, part + " ", x, y, color, max_x, line_height
+                        )
                     if idx < len(parts) - 1:
-                        x, y = _draw_next_note(ax, x, y, line_height, "------------NEXT NOTE---------------")
+                        x, y = _draw_next_note(
+                            ax,
+                            x,
+                            y,
+                            line_height,
+                            "------------NEXT NOTE---------------",
+                        )
             else:
                 color = cmap(norm(val))
-                x, y = _draw_token(ax, token_line + " ", x, y, color, max_x, line_height)
+                x, y = _draw_token(
+                    ax, token_line + " ", x, y, color, max_x, line_height
+                )
         else:
             x = 0.01
     return y
 
-def plot_highlighted_text_with_colorbar(shap_values, text_tokens, 
-                                        expected_value, mm_score,
-                                        figsize=(10, 4), 
-                                        cmap="coolwarm", save_path=None,
-                                        shap_range=None):
+
+def plot_highlighted_text_with_colorbar(
+    shap_values,
+    text_tokens,
+    expected_value,
+    mm_score,
+    figsize=(10, 4),
+    cmap="coolwarm",
+    save_path=None,
+    shap_range=None,
+):
     """
     Display a highlighted text plot and a colorbar based on SHAP values.
 
@@ -403,7 +465,7 @@ def plot_highlighted_text_with_colorbar(shap_values, text_tokens,
     cmap = plt.get_cmap(cmap)
 
     fig, ax = plt.subplots(figsize=figsize)
-    ax.axis('off')
+    ax.axis("off")
 
     # Render highlighted text using helper
     y = _render_highlighted_text(ax, shap_values, text_tokens, norm, cmap)
@@ -411,11 +473,13 @@ def plot_highlighted_text_with_colorbar(shap_values, text_tokens,
     # Draw a bounding box around the text area
     min_y = y - 0.08
     rect = mpl.patches.FancyBboxPatch(
-        (0, min_y), 1, 0.98-min_y,
+        (0, min_y),
+        1,
+        0.98 - min_y,
         boxstyle="round,pad=0.01",
         linewidth=2,
-        edgecolor='black',
-        facecolor='none'
+        edgecolor="black",
+        facecolor="none",
     )
     ax.add_patch(rect)
 
@@ -423,12 +487,21 @@ def plot_highlighted_text_with_colorbar(shap_values, text_tokens,
     sm = mpl.cm.ScalarMappable(cmap=cmap, norm=norm)
     sm.set_array([])
     cbar = plt.colorbar(
-        sm, ax=ax, orientation='horizontal',
-        fraction=0.15, pad=0.02, anchor=(0.5, 1.0), location='top'
+        sm,
+        ax=ax,
+        orientation="horizontal",
+        fraction=0.15,
+        pad=0.02,
+        anchor=(0.5, 1.0),
+        location="top",
     )
-    cbar.set_label(f'SHAP Values (Ref={expected_value:.3f}, TX-SHAP={mm_score}%)', fontsize=14, labelpad=10)
-    cbar.ax.xaxis.set_label_position('top')
-    cbar.ax.xaxis.set_ticks_position('top')
+    cbar.set_label(
+        f"SHAP Values (Ref={expected_value:.3f}, TX-SHAP={mm_score}%)",
+        fontsize=14,
+        labelpad=10,
+    )
+    cbar.ax.xaxis.set_label_position("top")
+    cbar.ax.xaxis.set_ticks_position("top")
 
     plt.tight_layout()
     if save_path:

@@ -284,17 +284,21 @@ print("Adding scaled feature variants to feature dictionary..")
 prep_data = pd.concat([train_dict["train"], train_dict["val"], train_dict["test"]])
 prep_data = encode_categorical_features(pl.DataFrame(prep_data))
 prep_data = prep_data.to_pandas()
-static_cols = col_dict['static_cols']
-dynamic0_cols = col_dict['dynamic0_cols']
-dynamic1_cols = col_dict['dynamic1_cols']
+static_cols = col_dict["static_cols"]
+dynamic0_cols = col_dict["dynamic0_cols"]
+dynamic1_cols = col_dict["dynamic1_cols"]
 
 # Create a mapping of subject_id to its corresponding scaled features
 scaled_features_map = prep_data[["subject_id"] + static_cols]
-scaled_features_map = scaled_features_map.set_index("subject_id").to_dict(orient="index")
+scaled_features_map = scaled_features_map.set_index("subject_id").to_dict(
+    orient="index"
+)
 
 for p_id in tqdm(feature_dict.keys()):
-    #print(scaled_features_map[p_id])
-    feature_dict[p_id]["static"] = np.array(list(scaled_features_map[p_id].values())).round(5).astype(np.float32)
+    # print(scaled_features_map[p_id])
+    feature_dict[p_id]["static"] = (
+        np.array(list(scaled_features_map[p_id].values())).round(5).astype(np.float32)
+    )
     feature_dict[p_id]["static"] = feature_dict[p_id]["static"].reshape(1, -1)
 
 print("---------------------------------")

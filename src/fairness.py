@@ -241,10 +241,13 @@ if __name__ == "__main__":
     # Get feature for all test_ids from metadata
     for pf, disp in zip(attributes, attr_disp, strict=False):
         attr_pf = ehr_static.select(pl.col(pf))
-        if pf == 'insurance':
+        if pf == "insurance":
             # Replace "Other" with "Medicare" in the insurance column
             attr_pf = attr_pf.with_columns(
-                pl.when(pl.col(pf) == "Other").then(pl.lit("Medicare").cast(pl.Utf8)).otherwise(pl.col(pf)).alias(pf)
+                pl.when(pl.col(pf) == "Other")
+                .then(pl.lit("Medicare").cast(pl.Utf8))
+                .otherwise(pl.col(pf))
+                .alias(pf)
             )
         if args.verbose:
             print("---------------------------------------")

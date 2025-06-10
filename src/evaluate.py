@@ -234,7 +234,7 @@ if __name__ == "__main__":
         if not os.path.exists(args.attr_path):
             print("Attributes metadata not found. Exiting...")
             sys.exit()
-        
+
     ehr_static = pl.read_csv(args.attr_path).to_pandas()
 
     test_set = MIMIC4Dataset(
@@ -270,7 +270,9 @@ if __name__ == "__main__":
         os.makedirs(eval_path)
 
     if (len(glob.glob(loss_path)) != 0) and (not args.group_models):
-        plot_learning_curve(loss_path, output_path=f"{eval_path}/lc_{args.model_path}.png")
+        plot_learning_curve(
+            loss_path, output_path=f"{eval_path}/lc_{args.model_path}.png"
+        )
     else:
         print(
             f"No losses.csv found at {loss_path}. Skipping learning curve plot for {args.model_path}."

@@ -115,7 +115,7 @@ if __name__ == "__main__":
     modalities = config["data"]["modalities"]
     with_ts = True if "timeseries" in modalities else False
     static_only = True if (len(modalities) == 1) and ("static" in modalities) else False
-    with_notes = True ### Text modality is required to construct the data batches but is left out when not used for training.
+    with_notes = True  ### Text modality is required to construct the data batches but is left out when not used for training.
     ### General setup
     outcomes = targets["outcomes"]["labels"]
     outcomes_disp = targets["outcomes"]["display"]

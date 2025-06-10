@@ -407,8 +407,12 @@ def encode_categorical_features(ehr_data: pl.DataFrame) -> pl.DataFrame:
     )
     ehr_data = ehr_data.drop(["race", "gender"])
     ### Drop temporal columns if only a few are retained (for MLP classifier stability)
-    ehr_data = ehr_data.drop([col for col in ehr_data.columns if col.startswith("dsf_")])
-    ehr_data = ehr_data.drop([col for col in ehr_data.columns if col.startswith("dsl_")])
+    ehr_data = ehr_data.drop(
+        [col for col in ehr_data.columns if col.startswith("dsf_")]
+    )
+    ehr_data = ehr_data.drop(
+        [col for col in ehr_data.columns if col.startswith("dsl_")]
+    )
     return ehr_data
 
 
@@ -521,34 +525,65 @@ def generate_train_val_test_set(
     }
     cont_cols = ["Age"]
     ### List non-normally distributed columns here for re-scaling
-    nn_cols = ["total_n_presc", "n_unique_conditions",
-               "n_presc_acetaminophen", "n_presc_acyclovir",
-               "n_presc_albuterol_neb_soln", "n_presc_amlodipine",
-               "n_presc_apixaban",  "n_presc_aspirin",
-               "n_presc_atorvastatin", "n_presc_calcium_carbonate",
-               "n_presc_carvedilol", "n_presc_cefepime",
-               "n_presc_ceftriaxone", "n_presc_docusate_sodium",
-               "n_presc_famotidine", "n_presc_folic_acid",
-               "n_presc_furosemide", "n_presc_gabapentin",
-               "n_presc_heparin", "n_presc_hydralazine",
-               "n_presc_hydromorphone_dilaudid", "n_presc_insulin",
-               "n_presc_ipratropium_albuterol_neb", "n_presc_lactulose",
-               "n_presc_levetiracetam", "n_presc_levothyroxine_sodium",
-               "n_presc_lisinopril", "n_presc_lorazepam",
-               "n_presc_metoprolol_succinate_xl", "n_presc_metoprolol_tartrate",
-               "n_presc_metronidazole", "n_presc_midodrine",
-               "n_presc_morphine_sulfate", "n_presc_multivitamins",
-               "n_presc_omeprazole", "n_presc_ondansetron",
-               "n_presc_oxycodone", "n_presc_pantoprazole",
-               "n_presc_piperacillin_tazobactam", "n_presc_polyethylene_glycol",
-               "n_presc_potassium_chloride", "n_presc_prednisone",
-               "n_presc_rifaximin", "n_presc_senna",
-               "n_presc_sevelamer_carbonate", "n_presc_tacrolimus",
-               "n_presc_thiamine", "n_presc_vancomycin",
-               "n_presc_vitamin_d", "n_presc_warfarin",
-               "pon_nutrition", "pon_cardiology", "pon_respiratory",
-               "pon_neurology", "pon_radiology", "pon_tpn",
-               "pon_hemodialysis"]
+    nn_cols = [
+        "total_n_presc",
+        "n_unique_conditions",
+        "n_presc_acetaminophen",
+        "n_presc_acyclovir",
+        "n_presc_albuterol_neb_soln",
+        "n_presc_amlodipine",
+        "n_presc_apixaban",
+        "n_presc_aspirin",
+        "n_presc_atorvastatin",
+        "n_presc_calcium_carbonate",
+        "n_presc_carvedilol",
+        "n_presc_cefepime",
+        "n_presc_ceftriaxone",
+        "n_presc_docusate_sodium",
+        "n_presc_famotidine",
+        "n_presc_folic_acid",
+        "n_presc_furosemide",
+        "n_presc_gabapentin",
+        "n_presc_heparin",
+        "n_presc_hydralazine",
+        "n_presc_hydromorphone_dilaudid",
+        "n_presc_insulin",
+        "n_presc_ipratropium_albuterol_neb",
+        "n_presc_lactulose",
+        "n_presc_levetiracetam",
+        "n_presc_levothyroxine_sodium",
+        "n_presc_lisinopril",
+        "n_presc_lorazepam",
+        "n_presc_metoprolol_succinate_xl",
+        "n_presc_metoprolol_tartrate",
+        "n_presc_metronidazole",
+        "n_presc_midodrine",
+        "n_presc_morphine_sulfate",
+        "n_presc_multivitamins",
+        "n_presc_omeprazole",
+        "n_presc_ondansetron",
+        "n_presc_oxycodone",
+        "n_presc_pantoprazole",
+        "n_presc_piperacillin_tazobactam",
+        "n_presc_polyethylene_glycol",
+        "n_presc_potassium_chloride",
+        "n_presc_prednisone",
+        "n_presc_rifaximin",
+        "n_presc_senna",
+        "n_presc_sevelamer_carbonate",
+        "n_presc_tacrolimus",
+        "n_presc_thiamine",
+        "n_presc_vancomycin",
+        "n_presc_vitamin_d",
+        "n_presc_warfarin",
+        "pon_nutrition",
+        "pon_cardiology",
+        "pon_respiratory",
+        "pon_neurology",
+        "pon_radiology",
+        "pon_tpn",
+        "pon_hemodialysis",
+    ]
 
     cat_cols = [
         "In-hospital death",
@@ -599,7 +634,9 @@ def generate_train_val_test_set(
     scaler = MinMaxScaler()
     train_x[nn_cols] = scaler.fit_transform(train_x[nn_cols])
     val_x[nn_cols] = scaler.transform(val_x[nn_cols])  # Apply transformation to val_x
-    test_x[nn_cols] = scaler.transform(test_x[nn_cols])  # Apply transformation to test_x
+    test_x[nn_cols] = scaler.transform(
+        test_x[nn_cols]
+    )  # Apply transformation to test_x
     train_x = pd.concat([train_x, train_y], axis=1)
     val_x = pd.concat([val_x, val_y], axis=1)
     test_x = pd.concat([test_x, test_y], axis=1)
@@ -1065,6 +1102,7 @@ def _resample_timeseries(timeseries: pl.DataFrame, freq: str = "1h") -> pl.DataF
         .fill_null(strategy="forward")
     )
 
+
 def _standardize_data(ts_data: pl.DataFrame) -> pl.DataFrame:
     """
     Standardizes the 'value' column in the time-series data with minmax scaling.
@@ -1075,17 +1113,18 @@ def _standardize_data(ts_data: pl.DataFrame) -> pl.DataFrame:
     Returns:
         pl.DataFrame: Standardized time-series data.
     """
-    #ts_vitals = ts_data.filter(pl.col("linksto") == "vitals_measurements")
+    # ts_vitals = ts_data.filter(pl.col("linksto") == "vitals_measurements")
     min_val = ts_data["value"].min()
     max_val = ts_data["value"].max()
     ts_data = ts_data.with_columns(
         ((pl.col("value") - min_val) / (max_val - min_val)).alias("value")
     )
-    #ts_data = ts_data.filter(pl.col("linksto") != "vitals_measurements")
+    # ts_data = ts_data.filter(pl.col("linksto") != "vitals_measurements")
     ## Append the standardized vitals data
-    #ts_data = ts_data.vstack(ts_vitals)
-    
+    # ts_data = ts_data.vstack(ts_vitals)
+
     return ts_data
+
 
 def _print_summary(
     n: int = 0,

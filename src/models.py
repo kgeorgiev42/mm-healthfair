@@ -54,6 +54,7 @@ class Gate(nn.Module):
         output = self.dropout(self.norm(output)).squeeze()
         return output
 
+
 ### Adversarial debiasing component for main model using Gradient Reversal Layer
 ## Used to restrict the main model from learning sensitive attributes
 class GradientReversalFunction(torch.autograd.Function):
@@ -61,12 +62,15 @@ class GradientReversalFunction(torch.autograd.Function):
     def forward(ctx, x, lambda_):
         ctx.lambda_ = lambda_
         return x.view_as(x)
+
     @staticmethod
     def backward(ctx, grad_output):
         return grad_output.neg() * ctx.lambda_, None
 
+
 def grad_reverse(x, lambda_=1.0):
     return GradientReversalFunction.apply(x, lambda_)
+
 
 class MMModel(L.LightningModule):
     def __init__(
@@ -88,7 +92,7 @@ class MMModel(L.LightningModule):
         with_packed_sequences=False,
         dataset=None,
         sensitive_attr_ids=None,  # list of indices in static features
-        adv_lambda=0.0,        # strength of adversarial penalty
+        adv_lambda=0.0,  # strength of adversarial penalty
     ):
         super().__init__()
         self.save_hyperparameters()
@@ -193,7 +197,9 @@ class MMModel(L.LightningModule):
             st_embed_dim, ts_embed_dim, nt_embed_dim, num_ts, fusion_method
         )
 
-    def _init_adversarial_heads(self, st_embed_dim, ts_embed_dim, nt_embed_dim, num_ts, fusion_method):
+    def _init_adversarial_heads(
+        self, st_embed_dim, ts_embed_dim, nt_embed_dim, num_ts, fusion_method
+    ):
         ### Adversarial classifier targeting sensitive attributes
         if self.sensitive_attr_ids:
             adv_in_dim = st_embed_dim if self.with_static else 0
@@ -207,13 +213,16 @@ class MMModel(L.LightningModule):
                 adv_in_dim = num_ts * ts_embed_dim
             elif self.with_notes:
                 adv_in_dim = nt_embed_dim
-            self.adv_heads = nn.ModuleList([
-                nn.Sequential(
-                    nn.Linear(adv_in_dim, adv_in_dim // 2),
-                    nn.ReLU(),
-                    nn.Linear(adv_in_dim // 2, 1)
-                ) for _ in self.sensitive_attr_ids
-            ])
+            self.adv_heads = nn.ModuleList(
+                [
+                    nn.Sequential(
+                        nn.Linear(adv_in_dim, adv_in_dim // 2),
+                        nn.ReLU(),
+                        nn.Linear(adv_in_dim // 2, 1),
+                    )
+                    for _ in self.sensitive_attr_ids
+                ]
+            )
             self.adv_criterion = torch.nn.BCEWithLogitsLoss()
         else:
             self.adv_heads = None
@@ -221,12 +230,11 @@ class MMModel(L.LightningModule):
     def prepare_batch(self, batch):
         ### Unpack batch based on the available modalities
         if self.st_only:
-          s, y, d, lengths, n = batch[0], batch[1], None, None, None
+            s, y, d, lengths, n = batch[0], batch[1], None, None, None
         elif self.st_ts or self.ts_only:
-          s, y, d, lengths, n = batch[0], batch[1], batch[2], batch[3], None
+            s, y, d, lengths, n = batch[0], batch[1], batch[2], batch[3], None
         else:
-          s, y, d, lengths, n = batch[0], batch[1], batch[2], batch[3], batch[4]
-          
+            s, y, d, lengths, n = batch[0], batch[1], batch[2], batch[3], batch[4]
 
         st_embed = self.embed_static(s) if self.with_static else None
         ts_embed = (
@@ -258,16 +266,19 @@ class MMModel(L.LightningModule):
                 else self.fuse(*ts_embed, st_embed)
             )
         elif self.st_only:
-          out = st_embed.squeeze()
+            out = st_embed.squeeze()
         elif self.ts_only:
-          out = torch.cat(ts_embed, dim=-1).squeeze()
+            out = torch.cat(ts_embed, dim=-1).squeeze()
         elif self.nt_only:
-          out = nt_embed.squeeze()
+            out = nt_embed.squeeze()
 
         x_hat = self.fc(out)
         # Return embeddings for adversarial loss if needed
-        return (x_hat.unsqueeze(0) if len(x_hat.shape) == 1 else x_hat, y, out, s) if self.adv_heads else (x_hat.unsqueeze(0) if len(x_hat.shape) == 1 else x_hat, y)
-
+        return (
+            (x_hat.unsqueeze(0) if len(x_hat.shape) == 1 else x_hat, y, out, s)
+            if self.adv_heads
+            else (x_hat.unsqueeze(0) if len(x_hat.shape) == 1 else x_hat, y)
+        )
 
     def training_step(self, batch, batch_idx):
         # training_step defines the train loop.
@@ -298,20 +309,22 @@ class MMModel(L.LightningModule):
                         adv_loss += self.adv_criterion(adv_pred, sensitive_label)
 
                 if len(self.sensitive_attr_ids) > 0:
-                     adv_loss = adv_loss / len(self.sensitive_attr_ids)
-                     loss = loss + self.adv_lambda * adv_loss
-                     self.log("adv_loss",
-                             adv_loss,
-                             prog_bar=True,
-                             on_epoch=True,
-                             on_step=False,
-                             batch_size=len(y))
+                    adv_loss = adv_loss / len(self.sensitive_attr_ids)
+                    loss = loss + self.adv_lambda * adv_loss
+                    self.log(
+                        "adv_loss",
+                        adv_loss,
+                        prog_bar=True,
+                        on_epoch=True,
+                        on_step=False,
+                        batch_size=len(y),
+                    )
                 else:
-                     # No sensitive attributes configured, no adversarial loss
-                     pass
+                    # No sensitive attributes configured, no adversarial loss
+                    pass
             else:
                 # print("Warning: Adversarial heads defined but static data 's' is None.")
-                pass # Adversarial heads are defined but static data is not available
+                pass  # Adversarial heads are defined but static data is not available
 
         self.log(
             "train_loss",
@@ -355,11 +368,12 @@ class MMModel(L.LightningModule):
         )
         return loss
 
-
     def validation_step(self, batch, batch_idx):
         # Do not penalize adversarial loss in validation
         if self.adv_heads:
-            x_hat, y, _, _ = self.prepare_batch(batch) # Still unpack all returned values
+            x_hat, y, _, _ = self.prepare_batch(
+                batch
+            )  # Still unpack all returned values
         else:
             x_hat, y = self.prepare_batch(batch)
         y_hat = torch.sigmoid(x_hat)
@@ -418,6 +432,7 @@ class MMModel(L.LightningModule):
         pos_weight = negative_samples / positive_samples
         print(f"Adjusting positive class weight to: {round(pos_weight, 3)}")
         return torch.tensor(pos_weight, dtype=torch.float32)
+
 
 class LitLSTM(L.LightningModule):
     """LSTM using time-series data only.
