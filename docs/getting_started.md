@@ -40,7 +40,7 @@ poetry run python3 src/any_script.py [required args] --[optional args]
 ```
 
 ## Data Curation
-### 0. Downloading the data
+### Downloading the data
 The MIMIC-IV dataset (v3.1) can be downloaded from [PhysioNet](https://physionet.org). 
 
 Steps to download:
@@ -51,7 +51,7 @@ Steps to download:
 3. Download the data.
 
 
-### 1. Extracting the data
+### Extracting the data
 The `extract_data.py` module uses the base **MIMIC-IV** database and the **MIMIC-IV-Ext-BHC** extension as raw data inputs. This feeds into a series of sequential operations for extracting and cleaning the individual data modalities. The data sources used for each modality include:
 - **Tabular (Static EHR) data modality**: demographics, prescriptions, previous diagnoses and provider orders (MIMIC-IV)
 - **Time-series data modality**: ED vital signs, in-hospital lab tests and measurements (MIMIC-IV and MIMIC-IV-ED)
@@ -86,7 +86,7 @@ poetry run python extract_data.py ../../data/MIMIC-IV -o ../outputs/ext_data -n 
 
 This command will read from the `../../data/MIMIC-IV` directory and extract the relevant measurements across the three data modalities for the complete population with linked ED attendances. The script will also create count features covering the top 50 most common prescriptions. ed/vitalsign.csv for 1000 stays. Three output files describing each data modality (`ehr_static.csv`, `events_ts.csv` and `notes.csv`) will be saved under the `../outputs/ext_data` folder.
 
-### 1.5. Data Exploration
+### Data Exploration
 
 Optionally, the `explore_data.py` script then allows the user to run basic data exploration on the three data files, generating a cohort summary describing the patient cohorts by outcome and a series of distribution plots by attribute. This script will access the `targets.toml` config file for the attribute and outcome names and the `feat_name_map.json` mapping for looking up the display names for each feature.
 
@@ -121,7 +121,7 @@ This will read the extracted MIMIC-IV files from `../outputs/ext_data/` and the 
 - Age group distributions by each sensitive attribute.
 - Violin plots of the log-transformed **Brief Hospital Course** lengths with statistical testing.
   
-### 2. Data Preprocessing
+### Data Preprocessing
 Once these core files have been extracted, we run `prepare_data.py` to create a multimodal feature dictionary for model training and evaluation. The time-series and text modalities can optionally be left out of the dictionary. This will execute a sequence of preprocessing strategies for each data modality in the following order:
 
 ```sh
@@ -277,7 +277,7 @@ poetry run python evaluate.py ../outputs/prep_data/mmfair_feat.pkl -e ../outputs
 ```
 This runs inference on a list of multimodal algorithms, with each model directory, display name and color for plotting explicitly set in `targets.toml` and its `paths` section.
 
-### Fairness evaluation
+### Fairness Evaluation
 
 In similar fashion, we can run `fairness.py` to evaluate a multimodal algorithm based on fairness metrics (Demographic Parity, Equalised Odds and Equal Opportunity). The script will use BCa bootstrapping to generate 95% CIs across each fairness metrics, over a set number of bootstrap iterations. There are two options for thresholding the output probabilities, selected using the `--threshold_method`. These are either Youden's J-statistic (default), selecting the best cutoff maximising the distance between TPR and FPR, or Max F1-score, optimised for precision and TPR strictly on the positive class. The [FairLearn](https://fairlearn.org) package is used to compute the fairness metrics across the sensitive attributes and perform error analysis. Once again, we can execute the script in two modes:
 - **Single mode** (`across_models=False`): Evaluates fairness for a single learner generating bootstrapped fairness metrics, error plots and age-stratified fairness plots. This will save a fairness dictionary under `<fair_path>/pf_<model_path>.pkl` storing the computed fairness values over the set bootstraps. Group mode will then require this dictionary for each target model to generate a grouped fairness summary.
@@ -321,7 +321,7 @@ This runs fairness inference on a list of multimodal algorithms, with each model
 
 **Note**: This requires each model specified in `targets.toml` to have been run in single mode first and have its fairness dictionary stored in their respective fairness output folder.
 
-### Explainability analysis
+### Explainability Analysis
 
 Finally, we can run `explain.py` to measure feature importance and understand the decision boundaries of a multimodal algorithm. Currently the script only supports interpreting a fully-fused model across all three data modalities (IF-EHR+TS+NT). It uses the [SHAP](https://shap.readthedocs.io/en/latest/) library for post-model global and local feature importance estimation and borrows ideas from the [MM-SHAP](https://github.com/Heidelberg-NLP/MM-SHAP/tree/main) library for aggregating SHAP values across modalities. 
 
