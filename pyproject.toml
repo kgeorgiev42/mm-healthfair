@@ -1,7 +1,7 @@
 [tool.poetry]
 name = "mm-healthfair"
-version = "0.1.0"
-description = ""
+version = "1.1.0"
+description = "MM-HealthFair: Evaluating Fairness in Multimodal Learning Approaches for Risk Prediction"
 authors = ["Sophie Martin <s.martin.20@ucl.ac.uk>", "Konstantin Georgiev <k.s.georgiev@sms.ed.ac.uk"]
 readme = "README.md"
 package-mode = false
