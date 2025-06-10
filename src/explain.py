@@ -1,5 +1,6 @@
 import argparse
 import glob
+import json
 import os
 import sys
 
@@ -10,22 +11,19 @@ import polars as pl
 import shap
 import toml
 import torch
-
-from tqdm import tqdm
 from datasets import CollateFn, CollateTimeSeries, MIMIC4Dataset
 from models import MMModel
-from torch import concat
 from torch.utils.data import DataLoader
+from tqdm import tqdm
 from utils.functions import load_pickle, save_pickle
-import json
 from utils.preprocessing import encode_categorical_features
 from utils.shap_utils import (
+    aggregate_ts,
+    estimate_mm_summary,
     get_feature_names,
     get_shap_local_decision_plot,
     get_shap_summary_plot,
     get_shap_values,
-    aggregate_ts,
-    estimate_mm_summary
 )
 
 if __name__ == "__main__":
@@ -284,7 +282,7 @@ if __name__ == "__main__":
     ### Get names as recorded in SHAP dictionary
     shap_colnames = get_feature_names(test_set, modalities=modalities)
     ### Load JSON file mapping feature names to display names
-    with open(args.feat_names, "r") as f:
+    with open(args.feat_names) as f:
         feature_names = json.load(f)
     ### Pre-compute SHAP values if not already done
     if compute_shap:
@@ -379,15 +377,17 @@ if __name__ == "__main__":
             notes_test = []
             feature_names = []
             notes_ctr = 0
+            emb_max = 768
+            emb_min = 3
             for i in range(len(test_ids)):
                 ### Collect raw notes from test samples
                 data_notes = np.array([s[0] for s in emb_dict[test_ids[i]]['notes']])
                 data_notes_tr = []
                 for j in range(len(data_notes)):
                     ## Trim to max embedding length for BioBERT
-                    if len(data_notes[j]) > 768:
+                    if len(data_notes[j]) > emb_max:
                         data_notes_tr.append(data_notes[j][:768])
-                    elif len(data_notes[j]) < 3:
+                    elif len(data_notes[j]) < emb_min:
                         continue
                     else:
                         data_notes_tr.append(data_notes[j])
@@ -395,12 +395,11 @@ if __name__ == "__main__":
                 notes_test.append(np.array(data_notes_tr))
                 feature_names.extend(np.array([data_notes_tr[j][:75] + '...' for j in range(len(data_notes_tr))]))
 
-            for batch_idx, batch in enumerate(dataloader):
+            for batch_idx, _ in enumerate(dataloader):
                 for shap_v in shap_dict['batch_' + str(batch_idx)]['notes']:
                     ### Need to retrieve correct length from original clinical note and filter out batch-wise padded SHAP values
-                    #batch_shap = np.array(shap_dict['batch_' + str(batch_idx)]['notes'][i][:len(notes_test[notes_ctr])]).reshape(1,-1)[0]
                     batch_shap = np.array(shap_v[0][:len(notes_test[notes_ctr])]).reshape(1,-1)[0]
-                    if len(batch_shap) < 3:
+                    if len(batch_shap) < emb_min:
                         continue
                     ### Flatten batch_shap and add to global values
                     shap_global_values.extend(np.array(batch_shap))
@@ -435,7 +434,7 @@ if __name__ == "__main__":
             for i in range(len(shap_dict)):
                 ids_list = []
                 ctr_list = []
-                for pt in shap_dict['batch_' + str(i)]['static']:
+                for _ in shap_dict['batch_' + str(i)]['static']:
                     ids_list.append(test_ids[p_ctr])
                     ctr_list.append(p_ctr)
                     p_ctr += 1

@@ -1,15 +1,10 @@
-import os
 import warnings
 
-import matplotlib.pyplot as plt
 import matplotlib as mpl
+import matplotlib.pyplot as plt
 import numpy as np
 import shap
-from IPython.core.display import HTML
-
-import lightning as L
 import torch
-import torch.nn.functional as F
 from torch import nn
 
 
@@ -80,7 +75,7 @@ def get_shap_values(model,
     """
     Compute SHAP values for each modality using the model's prepare_batch method.
     """
-    s, d, lengths, n = batch[0], batch[2], batch[3], batch[4]
+    s, d, _, n = batch[0], batch[2], batch[3], batch[4]
     ts_data = {}
     for i in range(num_ts):
         ts_data['dynamic' + str(i)] = d[i]
@@ -243,6 +238,9 @@ def get_shap_local_decision_plot(
     Estimate and show the multimodal degree of dependence.
     """
     shap.initjs()
+    ## Edit order of modalities if needed
+    ts_order = [1, 2]
+    notes_order = 3
     # Set format for SHAP values
     for i in range(len(shap_obj)):
         #shap_obj[i].values = shap_obj[i].values.round(6)
@@ -252,7 +250,7 @@ def get_shap_local_decision_plot(
         #print(max(shap_obj[i][0].values.round(3)), min(shap_obj[i][0].values.round(3)))
         ### Static EHR modality
         if i == 0:
-            fig = plt.figure(figsize=figsize)
+            plt.figure(figsize=figsize)
             shap_obj[i].data = np.where(shap_obj[i].data == 0, 'No', shap_obj[i].data)
             shap_obj[i].data = np.where(shap_obj[i].data == '1', 'Yes', shap_obj[i].data)
             ## Static EHR modality
@@ -271,9 +269,9 @@ def get_shap_local_decision_plot(
             plt.savefig(save_static_path, dpi=300)
             plt.close()
         ### Timeseries modalities
-        if i in [1, 2]:
+        if i in ts_order:
             shap_obj[i].data = np.where(shap_obj[i].data == -1, 'Missing', shap_obj[i].data)
-            fig = plt.figure(figsize=figsize)
+            plt.figure(figsize=figsize)
             shap.plots.decision(
                     shap_obj[i].base_values,
                     shap_obj[i].values,
@@ -296,7 +294,7 @@ def get_shap_local_decision_plot(
                 plt.savefig(save_ts1_path, bbox_inches="tight", dpi=300)
             plt.close()
         ### Notes modality
-        if i == 3:
+        if i == notes_order:
             shap_obj[i].values = np.array([shap_obj[i].values])[0]
             #shap_obj[i].base_values = shap_obj[i].base_values[0]
             shap_obj[i].data = shap_obj[i].data.astype('O')
@@ -307,7 +305,83 @@ def get_shap_local_decision_plot(
                                                 save_path=save_nt_path,
                                                 shap_range=shap_range)
 
-    print(f"SHAP local-level decision plots saved to disk.")
+    print("SHAP local-level decision plots saved to disk.")
+
+def _draw_token(ax, text, x, y, color, max_x, line_height):
+    text_width = 0.01 * len(text)
+    if x + text_width > max_x:
+        x = 0.01
+        y -= line_height
+    ax.text(x, y, text, fontsize=10, va='top', ha='left',
+            bbox=dict(facecolor=color, edgecolor='none', boxstyle='round,pad=0.1'))
+    x += text_width
+    return x, y
+
+def _draw_next_note(ax, x, y, line_height, note_text):
+    x = 0.01
+    y -= line_height
+    ax.text(x, y, note_text, fontsize=11, va='top', ha='left', color='black')
+    y -= line_height
+    x = 0.01
+    return x, y
+
+def _process_token_line(ax, token_line, val, cmap, norm, x, y, max_x, line_height):
+    if "<ENDNOTE> <STARTNOTE>" in token_line:
+        parts = token_line.split("<ENDNOTE> <STARTNOTE>")
+        for idx, part in enumerate(parts):
+            if part.strip():
+                color = cmap(norm(val))
+                x, y = _draw_token(ax, part, x, y, color, max_x, line_height)
+            if idx < len(parts) - 1:
+                x, y = _draw_next_note(ax, x, y, line_height, "------------NEXT NOTE-------------")
+        token_line = ""
+    else:
+        color = cmap(norm(val))
+        x, y = _draw_token(ax, token_line, x, y, color, max_x, line_height)
+        x = 0.01
+        y -= line_height
+        token_line = ""
+    return x, y, token_line
+
+def _render_highlighted_text(ax, shap_values, text_tokens, norm, cmap, line_height=0.08, max_x=0.98):
+    """
+    Helper function to render highlighted text with color background.
+    Refactored to reduce branches and statements.
+    """
+    x = 0.01
+    y = 0.95
+    for token, val in zip(text_tokens, shap_values, strict=False):
+        words = token.split()
+        word_count = 0
+        token_line = ""
+        for word in words:
+            token_line += word + " "
+            word_count += 1
+            # New line every 15 words
+            if word_count % 15 == 0:
+                x, y, token_line = _process_token_line(ax, token_line, val, cmap, norm, x, y, max_x, line_height)
+            # New line after every '#' symbol in word
+            if '#' in word:
+                color = cmap(norm(val))
+                x, y = _draw_token(ax, token_line, x, y, color, max_x, line_height)
+                x = 0.01
+                y -= line_height
+                token_line = ""
+        if token_line.strip():
+            if "<ENDNOTE> <STARTNOTE>" in token_line:
+                parts = token_line.split("<ENDNOTE> <STARTNOTE>")
+                for idx, part in enumerate(parts):
+                    if part.strip():
+                        color = cmap(norm(val))
+                        x, y = _draw_token(ax, part + " ", x, y, color, max_x, line_height)
+                    if idx < len(parts) - 1:
+                        x, y = _draw_next_note(ax, x, y, line_height, "------------NEXT NOTE---------------")
+            else:
+                color = cmap(norm(val))
+                x, y = _draw_token(ax, token_line + " ", x, y, color, max_x, line_height)
+        else:
+            x = 0.01
+    return y
 
 def plot_highlighted_text_with_colorbar(shap_values, text_tokens, 
                                         expected_value, mm_score,
@@ -331,98 +405,11 @@ def plot_highlighted_text_with_colorbar(shap_values, text_tokens,
     fig, ax = plt.subplots(figsize=figsize)
     ax.axis('off')
 
-    # Prepare text with colored background, handling new lines every 12 words and after every '#' symbol
-    x = 0.01
-    y = 0.95
-    line_height = 0.08
-    max_x = 0.98
-    for token, val in zip(text_tokens, shap_values):
-        words = token.split()
-        word_count = 0
-        token_line = ""
-        for word in words:
-            token_line += word + " "
-            word_count += 1
-            # New line every 15 words
-            if word_count % 15 == 0:
-                # Insert note separator if needed
-                if "<ENDNOTE> <STARTNOTE>" in token_line:
-                    parts = token_line.split("<ENDNOTE> <STARTNOTE>")
-                    for idx, part in enumerate(parts):
-                        if part.strip():
-                            color = cmap(norm(val))
-                            text_width = 0.01 * len(part)
-                            if x + text_width > max_x:
-                                x = 0.01
-                                y -= line_height
-                            ax.text(x, y, part, fontsize=10, va='top', ha='left',
-                                    bbox=dict(facecolor=color, edgecolor='none', boxstyle='round,pad=0.1'))
-                            x += text_width
-                        if idx < len(parts) - 1:
-                            # Add separator and move to new line
-                            x = 0.01
-                            y -= line_height
-                            ax.text(x, y, "------------NEXT NOTE-------------", fontsize=11, va='top', ha='left', color='black')
-                            y -= line_height
-                            x = 0.01
-                    token_line = ""
-                else:
-                    color = cmap(norm(val))
-                    text_width = 0.01 * len(token_line)
-                    if x + text_width > max_x:
-                        x = 0.01
-                        y -= line_height
-                    ax.text(x, y, token_line, fontsize=10, va='top', ha='left',
-                            bbox=dict(facecolor=color, edgecolor='none', boxstyle='round,pad=0.1'))
-                    x = 0.01
-                    y -= line_height
-                    token_line = ""
-            # New line after every '#' symbol in word
-            if '#' in word:
-                color = cmap(norm(val))
-                text_width = 0.01 * len(token_line)
-                if x + text_width > max_x:
-                    x = 0.01
-                    y -= line_height
-                ax.text(x, y, token_line, fontsize=10, va='top', ha='left',
-                        bbox=dict(facecolor=color, edgecolor='none', boxstyle='round,pad=0.1'))
-                x = 0.01
-                y -= line_height
-                token_line = ""
-        if token_line.strip():
-            # Insert note separator if needed
-            if "<ENDNOTE> <STARTNOTE>" in token_line:
-                parts = token_line.split("<ENDNOTE> <STARTNOTE>")
-                for idx, part in enumerate(parts):
-                    if part.strip():
-                        color = cmap(norm(val))
-                        text_width = 0.01 * len(part + " ")
-                        if x + text_width > max_x:
-                            x = 0.01
-                            y -= line_height
-                        ax.text(x, y, part + " ", fontsize=10, va='top', ha='left',
-                                bbox=dict(facecolor=color, edgecolor='none', boxstyle='round,pad=0.1'))
-                        x += text_width
-                    if idx < len(parts) - 1:
-                        x = 0.01
-                        y -= line_height
-                        ax.text(x, y, "------------NEXT NOTE---------------", fontsize=11, va='top', ha='left', color='black')
-                        y -= line_height
-                        x = 0.01
-            else:
-                color = cmap(norm(val))
-                text_width = 0.01 * len(token_line + " ")
-                if x + text_width > max_x:
-                    x = 0.01
-                    y -= line_height
-                ax.text(x, y, token_line + " ", fontsize=10, va='top', ha='left',
-                        bbox=dict(facecolor=color, edgecolor='none', boxstyle='round,pad=0.1'))
-                x += text_width
-        else:
-            x = 0.01
+    # Render highlighted text using helper
+    y = _render_highlighted_text(ax, shap_values, text_tokens, norm, cmap)
 
     # Draw a bounding box around the text area
-    min_y = y - line_height
+    min_y = y - 0.08
     rect = mpl.patches.FancyBboxPatch(
         (0, min_y), 1, 0.98-min_y,
         boxstyle="round,pad=0.01",
@@ -435,7 +422,6 @@ def plot_highlighted_text_with_colorbar(shap_values, text_tokens,
     # Add colorbar at the top and center it
     sm = mpl.cm.ScalarMappable(cmap=cmap, norm=norm)
     sm.set_array([])
-    # Set colorbar to cover the full plot width
     cbar = plt.colorbar(
         sm, ax=ax, orientation='horizontal',
         fraction=0.15, pad=0.02, anchor=(0.5, 1.0), location='top'

@@ -189,6 +189,12 @@ class MMModel(L.LightningModule):
         self.adv_lambda = adv_lambda
 
         # Adversarial heads for each sensitive attribute (binary classification)
+        self._init_adversarial_heads(
+            st_embed_dim, ts_embed_dim, nt_embed_dim, num_ts, fusion_method
+        )
+
+    def _init_adversarial_heads(self, st_embed_dim, ts_embed_dim, nt_embed_dim, num_ts, fusion_method):
+        ### Adversarial classifier targeting sensitive attributes
         if self.sensitive_attr_ids:
             adv_in_dim = st_embed_dim if self.with_static else 0
             if fusion_method == "concat":
@@ -251,13 +257,12 @@ class MMModel(L.LightningModule):
                 if self.st_first
                 else self.fuse(*ts_embed, st_embed)
             )
-        else:
-          if self.st_only:
-            out = st_embed.squeeze()
-          elif self.ts_only:
-            out = torch.cat(ts_embed, dim=-1).squeeze()
-          elif self.nt_only:
-            out = nt_embed.squeeze()
+        elif self.st_only:
+          out = st_embed.squeeze()
+        elif self.ts_only:
+          out = torch.cat(ts_embed, dim=-1).squeeze()
+        elif self.nt_only:
+          out = nt_embed.squeeze()
 
         x_hat = self.fc(out)
         # Return embeddings for adversarial loss if needed

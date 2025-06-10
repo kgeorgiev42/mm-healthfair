@@ -7,6 +7,7 @@ import polars as pl
 import spacy
 import torch
 from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import MinMaxScaler
 from tqdm import tqdm
 from transformers import AutoModel, AutoTokenizer
 from utils.functions import (
@@ -15,7 +16,6 @@ from utils.functions import (
     read_icd_mapping,
     rename_fields,
 )
-from sklearn.preprocessing import MinMaxScaler
 
 ###############################
 # EHR data preprocessing
@@ -117,7 +117,7 @@ def preproc_icd_module(
     )
     #### Create features for long-term chronic conditions
     if ltc_dict_path:
-        with open(lt_dict_path) as json_dict:
+        with open(ltc_dict_path) as json_dict:
             ltc_dict = json.load(json_dict)
         ### Initialise long-term condition column
         diagnoses = diagnoses.with_columns(
