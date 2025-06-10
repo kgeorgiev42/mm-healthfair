@@ -343,7 +343,6 @@ if __name__ == "__main__":
                 shap_global_values = []
                 actual_values = []
                 test_id = 0
-                # Use mean aggregation across all timepoints to display importances
                 for batch_idx, batch in enumerate(dataloader):
                     for ts_i in range(len(batch[2][i])):
                         batch_shap = shap_dict['batch_' + str(batch_idx)]['timeseries'][tg_field][ts_i]
@@ -469,6 +468,9 @@ if __name__ == "__main__":
             sys.exit()
         ### Randomly sample an individual case
         risk_idx = risk_idx.sample(n=1, random_state=42)['test_ids'].to_numpy().tolist()
+        ### Set specific patient ID for testing here
+        #risk_idx = []
+        print(f"Selected patient ID: {risk_idx[0]}")
         static_values = static_values.filter(
             pl.col("subject_id").is_in(list(map(int, risk_idx)))
         )

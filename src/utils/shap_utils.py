@@ -266,7 +266,7 @@ def get_shap_local_decision_plot(
                 show=False,
                 xlim=shap_range,
             )
-            plt.title(f"Static EHR modality (RQ={risk_quantile}, TAB-SHAP={mm_scores[0]}%).")
+            plt.title(f"Static modality (RQ={risk_quantile}, TB-SHAP={mm_scores[0]}%).")
             plt.tight_layout()
             plt.savefig(save_static_path, dpi=300)
             plt.close()
@@ -440,7 +440,7 @@ def plot_highlighted_text_with_colorbar(shap_values, text_tokens,
         sm, ax=ax, orientation='horizontal',
         fraction=0.15, pad=0.02, anchor=(0.5, 1.0), location='top'
     )
-    cbar.set_label(f'SHAP Values (Ref={expected_value:.3f}, T-SHAP={mm_score}%)', fontsize=14, labelpad=10)
+    cbar.set_label(f'SHAP Values (Ref={expected_value:.3f}, TX-SHAP={mm_score}%)', fontsize=14, labelpad=10)
     cbar.ax.xaxis.set_label_position('top')
     cbar.ax.xaxis.set_ticks_position('top')
 

@@ -11,6 +11,7 @@ lookup = ['hadm_id', 'yob', 'dod', 'admittime', 'dischtime', 'deathtime', 'edreg
 feats_to_save = ['anchor_age', 'gender_F', 'race_group_Hispanic_Latino', 'race_group_Black', 'race_group_White', 'race_group_Asian', 'race_group_Other', 'marital_status_Married', 'marital_status_Single', 'marital_status_Widowed', 'marital_status_Divorced', 'insurance_Medicare', 'insurance_Medicaid', 'insurance_Private', 'insurance_Other', 'in_hosp_death', 'ext_stay_7', 'icu_admission', 'non_home_discharge']
 categorical = []
 vitals = ['Diastolic blood pressure', 'Heart rate', 'Oxygen saturation', 'Respiratory rate', 'Systolic blood pressure', 'Temperature']
+dbindices = [86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99]
 
 [age]
 bins = [18, 49, 59, 69, 79, 91]
@@ -21,12 +22,12 @@ vitals_freq = '30m'
 lab_freq = '5h'
 
 [paths]
-model_paths = ["ext_stay_7_None_timeseries", "ext_stay_7_concat_static_timeseries", "ext_stay_7_concat_static_timeseries_notes"]
-model_names = ["ES(TS)", "ES(EF-EHR+TS)", "ES(EF-EHR+TS+NT)"]
-model_colors = ["#a50026", "#fc8d59", "#abd9e9"]
+model_paths = ["ext_stay_7_concat_static_timeseries_notes", "ext_stay_7_concat_static_timeseries_notes_db", "ext_stay_7_concat_static_timeseries_notes_db2", "ext_stay_7_concat_static_timeseries_notes_db3", "ext_stay_7_concat_static_timeseries_notes_db4", "ext_stay_7_concat_static_timeseries_notes_db5"]
+model_names = ["ES: IF-EHR+TS+NT", "Debiased: ld=0.2", "Debiased: ld=0.5", "Debiased: ld=1", "Debiased: ld=2", "Debiased: ld=5"]
+model_colors = ["#abd9e9", "#4575b4", "#fee090", "#fdae61", "#d73027", "#fc1fd0"]
 
 [shap_profile]
 sex = 'F'
-ethnicity = 'Black'
-marital_status = 'Single'
+ethnicity = 'White'
+marital_status = 'Married'
 insurance = 'Medicare'
