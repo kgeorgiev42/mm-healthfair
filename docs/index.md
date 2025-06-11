@@ -1,34 +1,46 @@
 # *MM-HealthFair*: Understanding Fairness and Explainability in Multimodal Approaches within Healthcare
 
-A crucial component to facilitating the adoption of AI in healthcare lies in the ability to justify, interpret, and effectively communicate the decisions of the system.
-This project aims to explore fairness and explainability in the context of multimodal AI for healthcare (see project description [here](https://nhsx.github.io/nhsx-internship-projects/advances-modalities-explainability/)). We investigate a the combination of modalities and evaluate approaches to multimodal modelling in terms of predictive accuracy, explainability and fairness. Specifically we address the following research questions:
+Innovations in digital health technologies continue to drive novel applications of Multimodal Artificial Intelligence (MMAI). These approaches showcase impressive prognostic performance for risk assessment, leading to improved opportunities for delivering healthcare. However, despite their superior discrimination ability over unimodal algorithms, MMAI approaches risk inheriting and amplifying hidden biases within routine healthcare data. Increasing understanding of fairness in model decisions is a crucial part of ensuring the equitable and safe use of AI-driven risk assessments in clinical practice. This project aims to explore fairness and explainability in the context of multimodal AI for healthcare (see project description [here](https://nhsx.github.io/nhsx-internship-projects/advances-modalities-explainability/)).
 
-1. How does the incorporation of time-dependant information impact the model?
-2. What is the impact of fusion strategies on explainability and fairness?
-3. What mitigation strategies can we apply to reduce bias against protected characteristics?
+The **MM-HealthFair** framework was developed to provide a clear evaluation of multimodal fairness and explainability, focusing on understanding driving factors behind MMAI decisions in healthcare. It leverages the **MIMIC-IV** open database for risk prediction in urgent care, supporting use of tabular, time-series and free-text data. The fairness toolkit provides a statistically-grounded validation of established fairness metrics for risk prediction, and an in-model adversarial mitigation mechanism to correct for biases in underrepresented groups. It additionally provides aggregates of **Shapley Additive eXplanations (SHAP)** estimates for interpreting decisions in a multimodal scenario and determining relative modality dependence.
+    
+**MM-HealthFair** is applicable for examining healthcare disparities and detecting patterns of attribution bias within sensitive groups. Fairness constraints can be enforced to mitigate the risk of introducing and amplifying these disparities within the training procedure of an **MMAI** algorithm. The output of this work aims to promote the dissemination of knowledge regarding fairness in MMAI algorithms, working towards ensuring transparent and equitable AI decisions. The framework contains the following key components:
+- Feature extraction and preparation for multimodal risk prediction using tabular (EHR), time-series and free-text data.
+- Multimodal algorithm development using intermediate fusion (feature concatenation).
+- Performance and Risk stratification analytics for binary classification.
+- Fairness analytics with bootstrapping.
+- [Deep adversarial mitigation](https://arxiv.org/abs/1801.07593) for inserting multimodal fairness constraints.
+- Explainable AI ([SHAP](https://shap.readthedocs.io/en/latest/)) analytics for multimodal feature importance and aggregated measures for modality dependence ([MM-SHAP](https://github.com/Heidelberg-NLP/MM-SHAP/blob/main/)).
 
-Specifically, we focus on a case study for **length-of-stay prediction** in hospital following admission to the emergency department. This is important for hospital management, ensuring sufficient resources are available for patients who may require long-term monitoring, as well as helping to support effective and efficient triage for those who may require urgent assistance without needing long-term stay.
+For a detailed walkthrough of the framework, please refer to the [Getting Started](https://github.com/nhsengland/mm-healthfair/blob/main/docs/getting_started.md) page.
 
-In this project, we considered the fusion of information across **static demographic features, time-series events and medical history extracted from discharge summaries** in a multimodal framework that aims to capture modality-specific features and inter-modality relationships. We evalute our models based on performance as well as **fairness** across a set of protected characteristics such as gender, race, marital status and insurance types. Importantly, we address how **bias within the data** can lead to differences in the fairness of a preditive model for different subgroups and how this can be **mitigated** to ensure demographic parity. We also explore how the choice of modelling approach can amplify or reduce these effects.
-
+![Concept Image](https://raw.githubusercontent.com/nhsengland/mm-healthfair/refs/heads/main/report/NHSE%20MMFair%20Concept.png)
 
 ## Data curation
-There are several pipelines available for reading, extracting data from the MIMIC dataset. However, due to the changes in structure with dataset revisions, many of these go out-of-date and it was not straight-forward to adapt them to MIMIC-IV v2.2. Additionally, the introduction of emergency department records and vitalsigns was newly introduced in MIMIC-IV. Existing work often made use of events tables from the hospital and ICU departments only. Moreover, whilst there have been studies exploring the use of MIMIC for multimodal modelling, many have focused on the use of clinical notes or chest-x-rays alongside electronic health data. Few studies have considered the use of **time-series data as a seperate modality** whilst making the dataset and models available for use in further analysis. Therefore, this project required the development of a data extraction and preprocessing pipeline specifically for extracting relevant data for emergency department and hospital admissions:
+
+This toolkit provides a reproducible feature extraction pipeline for the fusion of three data modalities: tabular health records, time-series and free-text data. It uses the MIMIC-IV dataset (version 3.1) to define prediction objectives for risk classification in hospitalised patients at point of arrival to the emergency department (ED). These include prediction of **in-hospital death**, **extended stay**, **non-home discharge** and **admission to ICU**. Target sensitive attributes to explore during the fairness analysis and debiasing process can be set between **gender**, **ethnicity**, **marital status** and **insurance**. The data curation and preprocessing is performed using the following scripts:
 
 1. `extract_data.py`: Reads and filters relevant hospital stay data from downloaded MIMIC-IV files.
-2. `prepare_data.py`: Cleans, preprocesses and filters stays into a single .pkl file for downstream analysis.
+2. `prepare_data.py`: Cleans and prepares features in unique patients for multimodal learning into a .pkl files for downstream analysis. This will also generate a training, validation and testing set for the specified risk prediction task.
 
-## Model training
-In this project, we additionally include scripts to train and evaluate different models on the dataset.
+Configurations regarding the target objective, the sensitive attributes and any additional metadata for visualisation can be customised by editing the `targets.toml` file.
 
-1. `create_train_test.py`: Generates a (balanced, stratified) list of training, validation and test ids for training, development and testing.
-2. `train.py`: Script to train a neural network for LOS prediction. Option to log and save models using [Weights & Biases](https://wandb.ai)
-3. `train_rf.py`: Script to train a Random Forest classifier for LOS prediction.
+## Multimodal learning and validation
+In this project, we use an intermediate fusion approach to fuse the three data modalities using concatenation with equal weight. Each modality is trained on a separate deep neural net component and fused at the final hidden layer. The currently supported network components are:
+- **MM-EHR**: Multi-layer Perceptron classifier for tabular data
+- **MM-TS**: 2-component LSTM classifier (for vital signs and lab measurements data)
+- **MM-NT**: Transformer-encoder network for free-text (discharge summaries) data
 
-Training configurations are specified in a config file. See `example_config.toml` for available settings.
+![MMLearning Concept](https://raw.githubusercontent.com/nhsengland/mm-healthfair/refs/heads/main/report/MMHealthFair%20Components.png)
 
-## Model evaluation
-Once models have been trained and saved, we also include the scripts used to compare their performance, generate explanations and quantify fairness across protected attributes. Moreover, the [Fairlearn](https://fairlearn.org/) package used for fairness evaluation is also used to explore mitigation strategies in `postprocess.py`
+After training a multimodal algorithm, we can execute the evaluation pipeline for performance assessment. To run the pipeline we use:
+1. `train.py`: Script to train a deep neural net for risk prediction. Option to log and save models using [Weights & Biases](https://wandb.ai).
+2. `evaluate.py`: Run model inference including performance/calibration/loss summaries with confidence intervals, including risk stratification to set risk quantiles per patient in the test set.
 
-1. `evaluate.py`: Evaluate a trained model's performance. Generates explainations with `--explain` and/or fairness metrics and plots with `--fairness`.
-2. `postprocess.py`: Run Fairlearn's [Threshold Optimizer](https://fairlearn.org/v0.10/user_guide/mitigation/postprocessing.html) to mitigate bias for a sensitive attribute.
+Training configurations are specified in a config file. See `model.toml` for available settings. Fusion method can set as: **None** (allows unimodal learning), **concat** (feature concatenation) or **mag** ([multi-adaptation gates](https://discovery.ucl.ac.uk/id/eprint/10188927/1/MAG___An_EXTENDED_Multimodal_Adaptation_Gate_for_Multimodal_Sentiment_Analysis.pdf) - works only when fusing tabular and time-series data). To enable adversarial mitigation, we set the `adv_lambda` above 0 within `model.toml`, then specify the target sensitive attribute ids in `targets.toml` (dbindices) add finally use the `--use_debiasing` argument when running `train.py`. This will include additional adversarial head units per attribute, reducing their influence within the tabular modality.
+
+## Fairness and Explainability analytics
+Once models have been trained and saved, we also include the scripts used to quantify fairness and examine explainability using local and global multimodal feature importance interfaces. The [Fairlearn](https://fairlearn.org/) package is used for fairness evaluation, while the [SHAP](https://shap.readthedocs.io/en/latest/) package is used to compute and aggregate Shapley values as multimodal feature importance scores. The supported fairness metrics include demographic parity (DPR), equalised odds (EQO) and equal opportunity (EOP). These can be estimated using confidence intervals with customisable bootstrapping iterations via the [BCa](https://www.erikdrysdale.com/bca_python/) method. Global-level explanation plots can be generated via SHAP density or heatmap plots for tabular and time-series or risk barchart plots highlighting important note segments. On the local-level, we can set a target patient profile to randomly sample, with sensitive attributes set in `targets.toml` and the target level of observed risk (estimated using `evaluate.py`). The script will attempt to extract the SHAP values for a patient matching this profile and visualise decision and note segment plots highlighting degree of modality dependence ([MM-SHAP](https://github.com/Heidelberg-NLP/MM-SHAP/blob/main)).
+
+1. `fairness.py`: Run the fairness inference and store results with bootstrapped samples in a binary `.pkl` dictionary.
+2. `explain.py`: Run the explainability inference, with `--exp_mode` in either `global` or `local` mode and save the multimodal feature importance plots.
