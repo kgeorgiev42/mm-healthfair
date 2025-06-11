@@ -17,11 +17,14 @@ from sklearn.metrics import (
 
 def plot_learning_curve(losses_path: str = None, output_path="learning_curve.png"):
     """
-    Plots the learning curve (training and validation loss) of the model.
+    Plot the learning curve (training and validation loss) from a CSV file.
 
     Args:
-        logs (dict): Path to csv file containing the training and validation loss.
+        losses_path (str): Path to CSV file containing the training and validation loss.
         output_path (str): Path to save the learning curve plot.
+
+    Returns:
+        None
     """
     if not glob.glob(losses_path):
         print(f"No file found at {losses_path}")
@@ -60,6 +63,19 @@ def plot_roc(
     result_dict: dict = None,
     outcome: str = "In-hospital Death",
 ):
+    """
+    Plot the ROC curve with AUC and 95% CI for a binary classifier.
+
+    Args:
+        y_test (np.array): Ground truth binary labels.
+        prob (np.array): Predicted probabilities for the positive class.
+        output_path (str): Path to save the ROC curve plot.
+        result_dict (dict): Target performance dictionary for storing performance metrics.
+        outcome (str): Name of the outcome being evaluated.
+
+    Returns:
+        None
+    """
     fpr, tpr, _ = roc_curve(y_test, prob, pos_label=1)
     roc_auc = auc(fpr, tpr)
     plt.figure(figsize=(6, 6))
@@ -99,6 +115,19 @@ def plot_pr(
     result_dict: dict = None,
     outcome: str = "In-hospital Death",
 ):
+    """
+    Plot the Precision-Recall curve with AUC and 95% CI for a binary classifier.
+
+    Args:
+        y_test (np.array): Ground truth binary labels.
+        prob (np.array): Predicted probabilities for the positive class.
+        output_path (str): Path to save the PR curve plot.
+        result_dict (dict): Target performance dictionary for storing performance metrics.
+        outcome (str): Name of the outcome being evaluated.
+
+    Returns:
+        None
+    """
     prevalence = np.sum(y_test) / len(y_test)
     precision, recall, _ = precision_recall_curve(y_test, prob, pos_label=1)
     pr_auc = auc(recall, precision)
@@ -127,7 +156,7 @@ def plot_calibration_curve(
     n_bins: int = 10,
 ):
     """
-    Plots the calibration curve for a deep learning model.
+    Plot the calibration curve for a binary classifier.
 
     Args:
         y_test (np.array): Ground truth binary labels (0 or 1).
@@ -169,23 +198,17 @@ def expect_f1(y_prob: np.array, thres: int) -> float:
     Returns:
         float: Expected F1 score.
     """
-    # y_pred = (y_prob >= thres).astype(int)
     idx_tp = np.where(y_prob >= thres)[0]
     idx_fn = np.where(y_prob < thres)[0]
     tp = y_prob[idx_tp].sum()
     fn = y_prob[idx_fn].sum()
     fp = len(idx_tp) - tp
-    # fp = np.sum((y_pred == 1) & (y_prob == 0))
-    # fn = np.sum((y_pred == 0) & (y_prob == 1))
-    # precision = tp / (tp + fp)
-    # recall = tp / (tp + fn)
-    # f1 = 2 * (precision * recall) / (precision + recall)
     return 2 * tp / (2 * tp + fp + fn) if (2 * tp + fp + fn) > 0 else 0
 
 
 def optimal_threshold(y_prob: np.array) -> float:
     """
-    Calculate the optimal threshold for binary classification.
+    Calculate the optimal threshold for binary classification based on expected F1 score.
 
     Args:
         y_prob (np.array): Predicted probabilities.
@@ -193,15 +216,26 @@ def optimal_threshold(y_prob: np.array) -> float:
     Returns:
         float: Optimal threshold.
     """
-    # thresholds = np.linspace(0, 1, 100)
     y_prob = np.sort(y_prob[::-1])
     f1_scores = [expect_f1(y_prob, p) for p in y_prob]
-    # optimal_thres = thresholds[np.argmax(f1_scores)]
     optimal_thres = y_prob[np.argmax(f1_scores)]
     return optimal_thres
 
 
 def get_roc_performance(y_test: np.array, prob: np.array, verbose: bool = False):
+    """
+    Compute ROC performance summary based on Youden's J statistic for a binary classifier.
+
+    Args:
+        y_test (np.array): Ground truth binary labels.
+        prob (np.array): Predicted probabilities for the positive class.
+        verbose (bool): If True, print detailed performance metrics.
+
+    Returns:
+        tuple: (bin_labels, res_dict_roc)
+            bin_labels (np.array): Binary predictions using Youden's J threshold.
+            res_dict_roc (dict): ROC statistics and confidence intervals.
+    """
     fpr, tpr, th = roc_curve(y_test, prob, pos_label=1)
     res_dict_roc = {}
     ### Get Youden's J statistic
@@ -214,8 +248,6 @@ def get_roc_performance(y_test: np.array, prob: np.array, verbose: bool = False)
         print("Classification report for J threshold:")
         print(classification_report(y_test, bin_labels, target_names=["0", "1"]))
 
-    # print(y_test, y_test.shape)
-    # print(prob, prob.shape)
     aucss, ci = cfi.roc_auc_score(y_test, prob, confidence_level=0.95)
     ppv, cip = cfi.ppv_score(y_test, bin_labels, confidence_level=0.95)
     npv, cin = cfi.npv_score(y_test, bin_labels, confidence_level=0.95)
@@ -231,8 +263,6 @@ def get_roc_performance(y_test: np.array, prob: np.array, verbose: bool = False)
     res_dict_roc["roc_upper"] = ci[1]
     res_dict_roc["roc_lower"] = ci[0]
     res_dict_roc["yd_idx"] = yd
-    # res_dict_roc['fpr'] = fpr
-    # res_dict_roc['tpr'] = tpr
     return bin_labels, res_dict_roc
 
 
@@ -243,6 +273,19 @@ def get_pr_performance(
     opt_f1: bool = True,
     verbose: bool = False,
 ):
+    """
+    Compute Precision-Recall performance metrics and confidence intervals.
+
+    Args:
+        y_test (np.array): Ground truth binary labels.
+        prob (np.array): Predicted probabilities for the positive class.
+        bin_labels (np.array): Binary predictions.
+        opt_f1 (bool): If True, use optimal F1 threshold.
+        verbose (bool): If True, print detailed performance metrics.
+
+    Returns:
+        dict: PR statistics and confidence intervals.
+    """
     precision, recall, _ = precision_recall_curve(y_test, prob, pos_label=1)
     res_dict_pr = {}
     ### Get F1 score
@@ -288,8 +331,6 @@ def get_pr_performance(
     ub = auc_score + 1.96 * auc_se
     if verbose:
         print(f"PR-AUC with 95% CI: {auc_score:.3f} [{lb:.3f}, {ub:.3f}]")
-        # print("Precision: {:.3f} [{:.3f}, {:.3f}]".format(prec_s, cip[0], cip[1]))
-        # print("Recall: {:.3f} [{:.3f}, {:.3f}]".format(recall_s, cin[0], cin[1]))
     res_dict_pr["pr_auc"] = auc_score
     res_dict_pr["pr_upper"] = ub
     res_dict_pr["pr_lower"] = lb
@@ -307,6 +348,19 @@ def get_all_roc_pr_summary(
     output_roc_path: str = "roc_summary.png",
     output_pr_path: str = "pr_summary.png",
 ):
+    """
+    Plot summary ROC and PR curves for multiple models.
+
+    Args:
+        res_dicts (list): List of dictionaries with model results.
+        models (list): List of model names.
+        colors (list): List of colors for plotting.
+        output_roc_path (str): Path to save ROC summary plot.
+        output_pr_path (str): Path to save PR summary plot.
+
+    Returns:
+        None
+    """
     plt.figure(figsize=(8, 5))
     for res_dict, model, color in zip(res_dicts, models, colors, strict=False):
         fpr, tpr, _ = roc_curve(res_dict["y_test"], res_dict["y_prob"], pos_label=1)
@@ -375,6 +429,25 @@ def rank_prediction_quantiles(
     attr_features: pd.DataFrame = None,
     verbose: bool = False,
 ):
+    """
+    Rank predictions into quantiles and plot risk stratification, optionally stratified by attribute.
+
+    Args:
+        y_test (np.array): Ground truth binary labels.
+        prob (np.array): Predicted probabilities for the positive class.
+        attrs (list): List of attribute names for stratification.
+        attr_disp (list): List of display names for attributes.
+        test_ids (list): List of subject IDs for test set.
+        n_bins (int): Number of quantiles.
+        outcome (str): Name of the outcome being evaluated.
+        output_path (str): Path to save the risk stratification plot.
+        by_attribute (bool): If True, stratify by attribute.
+        attr_features (pd.DataFrame): DataFrame with attribute features.
+        verbose (bool): If True, print detailed information.
+
+    Returns:
+        dict: Appended patient risk quantiles.
+    """
     if verbose:
         print(f"Ranking prediction quantiles for {outcome}..")
     res_dict = {}
@@ -448,7 +521,6 @@ def rank_prediction_quantiles(
                 title=f"Risk profiles: {outcome} by {disp}",
                 colormap="tab10",
             )
-            # print(eval_long)
             ax.legend(
                 title=f"{disp}",
                 labels=eval_long[f"{attr}_Value"].unique(),

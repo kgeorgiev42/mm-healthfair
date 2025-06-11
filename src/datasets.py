@@ -6,7 +6,12 @@ from utils.functions import load_pickle, preview_data
 
 
 class CollateFn:
-    """Custom collate function for static data and labels."""
+    """
+    Custom collate function for static data and labels.
+
+    Returns:
+        tuple: (static, labels) tensors stacked from the batch.
+    """
 
     def __call__(self, batch):
         static = torch.stack([data[0] for data in batch])
@@ -16,7 +21,16 @@ class CollateFn:
 
 
 class CollateTimeSeries:
-    """Custom collate function that can handle variable-length timeseries in a batch."""
+    """
+    Custom collate function that can handle variable-length timeseries in a batch.
+
+    Args:
+        method (str): Padding method, either "pack_pad" or "truncate".
+        min_events (int, optional): Minimum number of events for truncation.
+
+    Returns:
+        tuple: Batched tensors for static, labels, dynamic timeseries, (lengths), and optionally notes.
+    """
 
     def __init__(self, method="pack_pad", min_events=None) -> None:
         self.method = method
@@ -80,8 +94,19 @@ class CollateTimeSeries:
 
 
 class MIMIC4Dataset(Dataset):
-    """MIMIC-IV Dataset class. Subclass of Pytorch Dataset.
-    Reads from .pkl data dictionary where key is patient ID and values are the dataframes.
+    """
+    MIMIC-IV Dataset class for PyTorch.
+
+    Reads from a pickled data dictionary where key is patient ID and values are the dataframes.
+
+    Args:
+        data_path (str): Path to pickled data dictionary.
+        col_path (str): Path to pickled column dictionary.
+        split (str): Data split ("train", "val", "test").
+        ids (list): List of patient IDs for the split.
+        static_only (bool): If True, only return static features.
+        with_notes (bool): If True, include notes features.
+        outcome (str): Outcome variable name.
     """
 
     def __init__(
@@ -110,6 +135,12 @@ class MIMIC4Dataset(Dataset):
         self.splits[split] = ids
 
     def __len__(self):
+        """
+        Returns the number of samples in the dataset.
+
+        Returns:
+            int: Number of samples.
+        """
         return (
             len(self.splits[self.split])
             if self.split is not None
@@ -117,6 +148,15 @@ class MIMIC4Dataset(Dataset):
         )
 
     def __getitem__(self, idx):
+        """
+        Get a single sample from the dataset.
+
+        Args:
+            idx (int): Index of the sample.
+
+        Returns:
+            tuple: (static, label) or (static, label, dynamic) or (static, label, dynamic, notes)
+        """
         pt_id = int(self.splits[self.split][idx])
         static = self.data_dict[pt_id]["static"]
         label = torch.tensor(
@@ -144,6 +184,12 @@ class MIMIC4Dataset(Dataset):
                 return static, label, dynamic
 
     def print_label_dist(self):
+        """
+        Print the distribution of positive and negative cases in the dataset split.
+
+        Returns:
+            None
+        """
         # if no particular split then use entire data dict
         if self.split is None:
             id_list = self.id_list
@@ -165,12 +211,39 @@ class MIMIC4Dataset(Dataset):
         print(f"Negative cases: {self.id_list.shape[0] - n_positive}")
 
     def get_feature_dim(self, key="static"):
+        """
+        Get the feature dimension for a given key.
+
+        Args:
+            key (str): Feature key ("static", "dynamic0", etc.).
+
+        Returns:
+            int: Feature dimension.
+        """
         return self.data_dict[int(self.id_list[0])][key].shape[1]
 
     def get_feature_list(self, key="static"):
+        """
+        Get the list of feature names for a given key.
+
+        Args:
+            key (str): Feature key ("static", "dynamic0", etc.).
+
+        Returns:
+            list: List of feature names.
+        """
         return self.col_dict[key + "_cols"]
 
     def get_split_ids(self, split):
+        """
+        Get the list of patient IDs for a given split.
+
+        Args:
+            split (str): Split name ("train", "val", "test").
+
+        Returns:
+            list: List of patient IDs.
+        """
         return self.splits[split]
 
 

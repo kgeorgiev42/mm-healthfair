@@ -17,11 +17,17 @@ def read_admissions_table(
     verbose: bool = True,
     ext_stay_threshold: int = 7,
 ) -> pl.LazyFrame | pl.DataFrame:
-    """Reads in admissions.csv.gz table and formats column types.
+    """
+    Read and preprocess the admissions table from MIMIC-IV, setting up the ED population.
 
     Args:
-        mimic4_path (str): Path to directory containing downloaded MIMIC-IV hosp module files.
-        use_lazy (bool, optional): Whether to return a Polars LazyFrame or DataFrame. Defaults to False.
+        mimic4_path (str): Path to directory containing MIMIC-IV hospital module files.
+        use_lazy (bool): If True, return a Polars LazyFrame. Otherwise, return a DataFrame.
+        verbose (bool): If True, print summary statistics.
+        ext_stay_threshold (int): Threshold (in days) for setting extended stay outcome.
+
+    Returns:
+        pl.LazyFrame | pl.DataFrame: Admissions table with additional columns.
     """
     admits = pl.read_csv(
         os.path.join(mimic4_path, "admissions.csv.gz"),
@@ -109,14 +115,18 @@ def read_patients_table(
     use_lazy: bool = False,
     verbose: bool = True,
 ) -> pl.LazyFrame | pl.DataFrame:
-    """Reads in patients.csv.gz table and formats column types.
+    """
+    Read and preprocess the patients table from MIMIC-IV and join with admissions.
 
     Args:
-        mimic4_path (str): Path to directory containing downloaded MIMIC-IV hosp module files.
-        use_lazy (bool, optional): Whether to return a Polars LazyFrame or DataFrame. Defaults to False.
+        mimic4_path (str): Path to directory containing MIMIC-IV module files.
+        admissions_data (pl.DataFrame | pl.LazyFrame): Admissions table.
+        age_cutoff (int): Minimum age to include.
+        use_lazy (bool): If True, return a Polars LazyFrame. Otherwise, return a DataFrame.
+        verbose (bool): If True, print summary statistics.
 
     Returns:
-        pl.LazyFrame | pl.DataFrame: Patients table.
+        pl.LazyFrame | pl.DataFrame: Patients table with joined admissions and derived outcomes.
     """
     pats = pl.read_csv(
         os.path.join(mimic4_path, "patients.csv.gz"),
@@ -185,15 +195,17 @@ def read_icu_table(
     use_lazy: bool = False,
     verbose: bool = True,
 ) -> pl.LazyFrame | pl.DataFrame:
-    """Reads in icustays.csv.gz table and parses ICU admission outcome.
+    """
+    Read and preprocess the ICU stays table and join with admissions.
 
     Args:
-        mimic4_path (str): Path to directory containing downloaded MIMIC-IV hosp module files.
+        mimic4_ed_path (str): Path to directory containing MIMIC-IV module files.
         admissions_data (pl.DataFrame | pl.LazyFrame): Admissions table.
-        use_lazy (bool, optional): Whether to return a Polars LazyFrame or DataFrame. Defaults to False.
+        use_lazy (bool): If True, return a Polars LazyFrame. Otherwise, return a DataFrame.
+        verbose (bool): If True, print summary statistics.
 
     Returns:
-        pl.LazyFrame | pl.DataFrame: ICU stays table.
+        pl.LazyFrame | pl.DataFrame: ICU stays table with joined admissions and derived columns.
     """
     icu = pl.read_csv(
         os.path.join(mimic4_ed_path, "icustays.csv.gz"),
@@ -250,6 +262,15 @@ def read_icu_table(
 
 
 def read_d_icd_diagnoses_table(mimic4_path):
+    """
+    Read the ICD diagnoses dictionary table from MIMIC-IV.
+
+    Args:
+        mimic4_path (str): Path to directory containing MIMIC-IV module files.
+
+    Returns:
+        pl.DataFrame: ICD diagnoses dictionary table.
+    """
     d_icd = pl.read_csv(
         os.path.join(mimic4_path, "d_icd_diagnoses.csv.gz"),
         columns=["icd_code", "long_title"],
@@ -265,14 +286,18 @@ def read_diagnoses_table(
     verbose: bool = True,
     use_lazy: bool = False,
 ) -> pl.LazyFrame | pl.DataFrame:
-    """Reads in diagnoses_icd.csv.gz table and formats column types.
+    """
+    Read and preprocess the diagnoses table from MIMIC-IV and join with admissions.
 
     Args:
-        mimic4_path (str): Path to directory containing downloaded MIMIC-IV hosp module files.
-        use_lazy (bool, optional): Whether to return a Polars LazyFrame or DataFrame. Defaults to False.
+        mimic4_path (str): Path to directory containing MIMIC-IV module files.
+        admissions_data (pl.DataFrame | pl.LazyFrame): Admissions table.
+        adm_last (pl.DataFrame | pl.LazyFrame): Final hospitalisations table for looking up prior diagnoses.
+        verbose (bool): If True, print summary statistics.
+        use_lazy (bool): If True, return a Polars LazyFrame. Otherwise, return a DataFrame.
 
     Returns:
-        pl.LazyFrame | pl.DataFrame: Diagnoses table.
+        pl.LazyFrame | pl.DataFrame: Diagnoses table filtered and joined with admissions.
     """
     diag = pl.read_csv(
         os.path.join(mimic4_path, "diagnoses_icd.csv.gz"),
@@ -313,14 +338,18 @@ def read_notes(
     verbose: bool = True,
     use_lazy: bool = False,
 ) -> pl.LazyFrame | pl.DataFrame:
-    """Read in discharge summary and preprocessed BHC segments.
+    """
+    Read and preprocess discharge summary and link Brief Hospital Course segments.
 
     Args:
-        mimic4_path (str): _description_
-        use_lazy (bool): Whether to return a Polars LazyFrame or DataFrame. Defaults to False.
+        admissions_data (pl.DataFrame | pl.LazyFrame): Admissions table.
+        admits_last (pl.DataFrame | pl.LazyFrame): Final hospitalisations table for looking up notes history.
+        mimic4_path (str): Path to directory containing MIMIC-IV module files.
+        verbose (bool): If True, print summary statistics.
+        use_lazy (bool): If True, return a Polars LazyFrame. Otherwise, return a DataFrame.
 
     Returns:
-        pl.LazyFrame | pl.DataFrame: _description_
+        pl.LazyFrame | pl.DataFrame: Notes table joined with admissions and BHC segments.
     """
     notes = pl.read_csv(
         os.path.join(mimic4_path, "discharge.csv.gz"),
@@ -424,7 +453,17 @@ def get_notes_population(
     admit_last: pl.DataFrame | pl.LazyFrame,
     use_lazy: bool = False,
 ) -> pl.DataFrame:
-    """Gets population of unique ED patients with existing note history."""
+    """
+    Get population of unique ED patients with existing note history.
+
+    Args:
+        adm_notes (pl.DataFrame | pl.LazyFrame): Notes table.
+        admit_last (pl.DataFrame | pl.LazyFrame): Last hospitalisations table for looking up notes history.
+        use_lazy (bool): If True, return a Polars LazyFrame. Otherwise, return a DataFrame.
+
+    Returns:
+        tuple: Patients and Grouped notes table (ed_pts, notes_grouped) as DataFrames or LazyFrames.
+    """
     if isinstance(adm_notes, pl.LazyFrame):
         adm_notes = adm_notes.collect(streaming=True)
     if isinstance(admit_last, pl.LazyFrame):
@@ -468,15 +507,17 @@ def read_omr_table(
     use_lazy: bool = False,
     vitalsign_uom_map: dict = None,
 ) -> pl.LazyFrame | pl.DataFrame:
-    """Reads in omr.csv.gz table and formats column types.
-    Sets measures for blood pressure and BMI in long format.
+    """
+    Read and preprocess the omr table (online medical records containing in-hospital measurements) from MIMIC-IV.
 
     Args:
-        mimic4_path (str): Path to directory containing downloaded MIMIC-IV hosp module files.
-        use_lazy (bool, optional): Whether to return a Polars LazyFrame or DataFrame. Defaults to False.
+        mimic4_path (str): Path to directory containing MIMIC-IV module files.
+        admits_last (pl.DataFrame | pl.LazyFrame): Final hospitalisations table for looking up historical data.
+        use_lazy (bool): If True, return a Polars LazyFrame. Otherwise, return a DataFrame.
+        vitalsign_uom_map (dict, optional): Mapping for measurement units.
 
     Returns:
-        pl.LazyFrame | pl.DataFrame: Omr table.
+        pl.LazyFrame | pl.DataFrame: OMR table in long format.
     """
     vitalsign_uom_map = {
         "Temperature": "°F",
@@ -561,14 +602,18 @@ def read_vitals_table(
     vitalsign_column_map: dict = None,
     vitalsign_uom_map: dict = None,
 ) -> pl.LazyFrame | pl.DataFrame:
-    """Reads in vitalsign.csv.gz table and formats column types.
+    """
+    Read and preprocess the vitalsign table from MIMIC-IV-ED.
 
     Args:
-        mimic4_path (str): Path to directory containing downloaded MIMIC-IV hosp module files.
-        use_lazy (bool, optional): Whether to return a Polars LazyFrame or DataFrame. Defaults to False.
+        mimic4_ed_path (str): Path to directory containing MIMIC-IV ED module files.
+        admits_last (pl.DataFrame | pl.LazyFrame): Final hospitalisations table for looking up historical data.
+        use_lazy (bool): If True, return a Polars LazyFrame. Otherwise, return a DataFrame.
+        vitalsign_column_map (dict, optional): Mapping for vital sign column names.
+        vitalsign_uom_map (dict, optional): Mapping for vital sign units.
 
     Returns:
-        pl.LazyFrame | pl.DataFrame: Vitals table.
+        pl.LazyFrame | pl.DataFrame: Vitals table in long format.
     """
     vitalsign_uom_map = {
         "Temperature": "°F",
@@ -637,15 +682,16 @@ def read_labevents_table(
     admits_last: pl.DataFrame | pl.LazyFrame,
     include_items: str = "../config/lab_items.csv",
 ) -> pl.LazyFrame:
-    """Reads in events.csv.gz tables from MIMIC-IV and formats column types.
+    """
+    Read and preprocess the labevents table from MIMIC-IV.
 
     Args:
-        table (str): Name of the events table. Currently supports 'vitalsign' or 'labevents'
-        mimic4_path (str): Path to directory containing events
-        include_items (list, optional): Filepath for itemid values to filter. Defaults to None.
+        mimic4_path (str): Path to directory containing MIMIC-IV module files.
+        admits_last (pl.DataFrame | pl.LazyFrame): Last admissions table for lookup.
+        include_items (str): Path to file listing lab item IDs to include.
 
     Returns:
-        pl.LazyFrame : Long-format events table.
+        pl.LazyFrame: Labevents table in long format.
     """
     if isinstance(admits_last, pl.LazyFrame):
         admits_last = admits_last.collect()
@@ -704,12 +750,15 @@ def merge_events_table(
     use_lazy: bool = False,
     verbose: bool = True,
 ) -> pl.LazyFrame | pl.DataFrame:
-    """Merges vitals, labevents, and omr tables.
+    """
+    Merge vitals, labevents, and omr tables into a single events table for time-series modality.
 
     Args:
         vitals (pl.LazyFrame | pl.DataFrame): Vitals table.
         labs (pl.LazyFrame | pl.DataFrame): Labevents table.
-        omr (pl.LazyFrame | pl.DataFrame): Omr table.
+        omr (pl.LazyFrame | pl.DataFrame): OMR table.
+        use_lazy (bool): If True, return a Polars LazyFrame. Otherwise, return a DataFrame.
+        verbose (bool): If True, print summary statistics.
 
     Returns:
         pl.LazyFrame | pl.DataFrame: Merged events table.
@@ -752,7 +801,17 @@ def get_population_with_measures(
     admit_last: pl.DataFrame | pl.LazyFrame,
     use_lazy: bool = False,
 ) -> pl.DataFrame:
-    """Gets population of unique ED patients with recorded measurements."""
+    """
+    Get population of unique ED patients with recorded measurements.
+
+    Args:
+        events (pl.DataFrame | pl.LazyFrame): Events table.
+        admit_last (pl.DataFrame | pl.LazyFrame): Last hospitalisations table for lookup.
+        use_lazy (bool): If True, return a Polars LazyFrame. Otherwise, return a DataFrame.
+
+    Returns:
+        pl.DataFrame or pl.LazyFrame: Patient-level table with measurement counts.
+    """
     if isinstance(events, pl.LazyFrame):
         events = events.collect(streaming=True)
     if isinstance(admit_last, pl.LazyFrame):
@@ -781,7 +840,18 @@ def read_medications_table(
     use_lazy: bool = False,
     top_n: int = 50,
 ) -> pl.LazyFrame | pl.DataFrame:
-    "Gets medication table from online administration record containing orders data."
+    """
+    Get medication table from online administration record containing orders data.
+
+    Args:
+        mimic4_path (str): Path to directory containing MIMIC-IV module files.
+        admits_last (pl.DataFrame | pl.LazyFrame): Last hospitalisations table for looking up historical data.
+        use_lazy (bool): If True, return a Polars LazyFrame. Otherwise, return a DataFrame.
+        top_n (int): Includes the top N most commonly prescribed medications as count features.
+
+    Returns:
+        pl.LazyFrame | pl.DataFrame: Admissions table with medication features.
+    """
     if isinstance(admits_last, pl.LazyFrame):
         admits_last = admits_last.collect()
 
@@ -813,7 +883,17 @@ def read_medications_table(
 def read_specialty_table(
     mimic4_path: str, admits_last: pl.DataFrame | pl.LazyFrame, use_lazy: bool = False
 ) -> pl.LazyFrame | pl.DataFrame:
-    "Collects specialty-grouped count features from secondary care order history."
+    """
+    Collect specialty-grouped count features from secondary care provider order history.
+
+    Args:
+        mimic4_path (str): Path to directory containing MIMIC-IV module files.
+        admits_last (pl.DataFrame | pl.LazyFrame): Last hospitalisations table for looking up historical data.
+        use_lazy (bool): If True, return a Polars LazyFrame. Otherwise, return a DataFrame.
+
+    Returns:
+        pl.LazyFrame | pl.DataFrame: Admissions table with specialty features.
+    """
     if isinstance(admits_last, pl.LazyFrame):
         admits_last = admits_last.collect()
 
@@ -896,7 +976,20 @@ def save_multimodal_dataset(
     use_notes: bool = True,
     output_path: str = "../outputs/extracted_data",
 ):
-    "Saves multimodal data to be used in feature selection and training modules."
+    """
+    Export datasets (EHR, events, notes) to CSV files for downstream processing.
+
+    Args:
+        admits_last (pl.DataFrame | pl.LazyFrame): Static EHR data.
+        events (pl.DataFrame | pl.LazyFrame): Events time-series data.
+        notes (pl.DataFrame | pl.LazyFrame): Notes data.
+        use_events (bool): If True, save events data.
+        use_notes (bool): If True, save notes data.
+        output_path (str): Directory to save the output files.
+
+    Returns:
+        None
+    """
     #### Save EHR data (required)
     if isinstance(admits_last, pl.LazyFrame):
         admits_last = admits_last.collect()

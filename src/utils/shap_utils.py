@@ -10,14 +10,14 @@ from torch import nn
 
 def get_feature_names(test_set, modalities):
     """
-    Get feature names based on the modality type.
+    Get feature names for each modality in the test set and save the column mappings to a dictionary.
 
-    Parameters:
-    - test_set: The test set object containing feature information.
-    - modality_type: Type of data ('tabular', 'ts-vitals', 'ts-labs' or 'notes').
+    Args:
+        test_set (MIMIC4Dataset): The test set object containing feature information.
+        modalities (list): List of modality types ('static', 'timeseries', 'notes').
 
     Returns:
-    - feature_names: List of feature names.
+        dict: Mapping from modality type to list of feature names.
     """
     fn_map = {}
     for modality_type in modalities:
@@ -25,7 +25,6 @@ def get_feature_names(test_set, modalities):
             feature_names = test_set.get_feature_list()
             fn_map["static"] = feature_names
         elif modality_type == "timeseries":
-            # print(test_set.col_dict)
             feature_names = test_set.get_feature_list("dynamic0")
             fn_map["ts-vitals"] = feature_names
             feature_names = test_set.get_feature_list("dynamic1")
@@ -36,7 +35,14 @@ def get_feature_names(test_set, modalities):
 
 class ModelWrapper(torch.nn.Module):
     """
-    A wrapper around the model to ensure scalar outputs for SHAP.
+    A DeepSHAP wrapper around the PyTorch model to ensure scalar outputs for SHAP.
+
+    Args:
+        model: The base model to wrap.
+        modality (str): The modality type ('static', 'timeseries', 'notes').
+        total_dim (int): Input dimension for the linear layer.
+        target_size (int): Output dimension for the linear layer.
+        ts_ind (int, optional): Target for timeseries data (0 - vital signs, 1 - lab measurements).
     """
 
     def __init__(self, model, modality, total_dim, target_size, ts_ind=None):
@@ -70,7 +76,17 @@ class ModelWrapper(torch.nn.Module):
 
 def get_shap_values(model, batch, device, num_ts, modalities):
     """
-    Compute SHAP values for each modality using the model's prepare_batch method.
+    Batch-wise SHAP computation of attribution scores for each modality using the model's prepare_batch method.
+
+    Args:
+        model (MMModel): The model to explain.
+        batch (DataLoader object): Batch of input data.
+        device (torch.device): Torch device ('cpu' or 'gpu').
+        num_ts (int): Number of timeseries modalities.
+        modalities (list): List of modalities to explain.
+
+    Returns:
+        dict: SHAP values for each modality.
     """
     s, d, _, n = batch[0], batch[2], batch[3], batch[4]
     ts_data = {}
@@ -117,6 +133,21 @@ def get_shap_values(model, batch, device, num_ts, modalities):
 
 
 def estimate_mm_summary(shap_scores, shap_expected_scores):
+    """
+    Estimate aggregate multimodal SHAP values for calculating relative degree of modality dependence.
+    Aggregate SHAP values are inspired by MM-SHAP (https://github.com/Heidelberg-NLP/MM-SHAP).
+
+    Args:
+        shap_scores (list): List of SHAP value arrays for each modality.
+        shap_expected_scores (list): List of expected (reference) SHAP values for each modality. Estimated from the batch-wise SHAP mean.
+
+    Returns:
+        tuple: (mm_scores, shap_expected_ovr, shap_max_ovr, shap_min_ovr)
+        mm_scores (list): Multimodal SHAP scores for each modality.
+        shap_expected_ovr (float): Overall expected SHAP value across modalities.
+        shap_max_ovr (float): Maximum SHAP value across all modalities.
+        shap_min_ovr (float): Minimum SHAP value across all modalities.
+    """
     # Average expected values across modalities
     shap_expected_ovr = np.mean(
         [
@@ -161,15 +192,20 @@ def get_shap_summary_plot(
     heatmap=False,
 ):
     """
-    Generate a SHAP summary plot.
+    Generate and save a global-level SHAP summary plot for a given modality.
 
-    Parameters:
-    - shap_values: The calculated SHAP values.
-    - feature_names: List of feature names.
-    - title: Title for the plot (optional).
+    Args:
+        shap_obj: SHAP explanation object.
+        outcome (str): Outcome name for plot title.
+        fusion_type (str): Fusion type for plot title.
+        modality (str): Modality type ('static', 'timeseries', 'notes').
+        max_features (int): Maximum number of features to display.
+        figsize (tuple): Figure size.
+        save_path (str): Path to save the plot.
+        heatmap (bool): If True, plot as heatmap.
 
     Returns:
-    - None: Displays the SHAP summary plot.
+        None
     """
     plt.figure()
     shap.initjs()
@@ -208,14 +244,13 @@ def get_shap_summary_plot(
 
 def aggregate_ts(data):
     """
-    Use mean aggregation to average timeseries data from the final hidden layer.
-    Ignores missing values from the model output.
+    Aggregate timeseries SHAP values using mean pooling, ignoring missing values.
 
-    Parameters:
-    - shap_values: The calculated SHAP values.
+    Args:
+        data (list or np.ndarray): List of timeseries SHAP arrays.
 
     Returns:
-    - aggregated_shap_values: Dictionary with feature names as keys and aggregated SHAP values as values.
+        np.ndarray: Aggregated SHAP values.
     """
     to_agg = []
     ## Remove 0-padded intervals
@@ -252,9 +287,21 @@ def get_shap_local_decision_plot(
     mm_scores=None,
 ):
     """
-    Generate a SHAP decision plot for tabular and timeseries data.
-    Generate a SHAP text plot for notes data.
-    Estimate and show the multimodal degree of dependence.
+    Generate and save SHAP local-level decision plots for each modality and text highlight plot for the note segments.
+
+    Args:
+        shap_obj: List of SHAP explanation objects.
+        risk_quantile: Risk quantile for plot title.
+        figsize (tuple): Figure size.
+        save_static_path (str): Path to save static modality plot.
+        save_ts0_path (str): Path to save timeseries vitals plot.
+        save_ts1_path (str): Path to save timeseries labs plot.
+        save_nt_path (str): Path to save notes plot.
+        shap_range (tuple): SHAP value range for plots.
+        mm_scores (list): Multimodal SHAP scores.
+
+    Returns:
+        None
     """
     shap.initjs()
     ## Edit order of modalities if needed
@@ -323,7 +370,6 @@ def get_shap_local_decision_plot(
         ### Notes modality
         if i == notes_order:
             shap_obj[i].values = np.array([shap_obj[i].values])[0]
-            # shap_obj[i].base_values = shap_obj[i].base_values[0]
             shap_obj[i].data = shap_obj[i].data.astype("O")
             plot_highlighted_text_with_colorbar(
                 shap_obj[i].values.round(3),
@@ -338,6 +384,21 @@ def get_shap_local_decision_plot(
 
 
 def _draw_token(ax, text, x, y, color, max_x, line_height):
+    """
+    Draw a single sentence token from a discharge sumamry with background color on the plot.
+
+    Args:
+        ax: Matplotlib axis.
+        text (str): Token text.
+        x (float): X position.
+        y (float): Y position.
+        color: Background color.
+        max_x (float): Maximum X position.
+        line_height (float): Height of a line.
+
+    Returns:
+        tuple: Updated (x, y) positions.
+    """
     text_width = 0.01 * len(text)
     if x + text_width > max_x:
         x = 0.01
@@ -356,6 +417,19 @@ def _draw_token(ax, text, x, y, color, max_x, line_height):
 
 
 def _draw_next_note(ax, x, y, line_height, note_text):
+    """
+    Draw a separator for the next note in the plot.
+
+    Args:
+        ax: Matplotlib axis.
+        x (float): X position.
+        y (float): Y position.
+        line_height (float): Height of a line.
+        note_text (str): Separator text.
+
+    Returns:
+        tuple: Updated (x, y) positions.
+    """
     x = 0.01
     y -= line_height
     ax.text(x, y, note_text, fontsize=11, va="top", ha="left", color="black")
@@ -365,6 +439,23 @@ def _draw_next_note(ax, x, y, line_height, note_text):
 
 
 def _process_token_line(ax, token_line, val, cmap, norm, x, y, max_x, line_height):
+    """
+    Process and draw a line of tokens, handling note separators.
+
+    Args:
+        ax: Matplotlib axis.
+        token_line (str): Line of tokens.
+        val (float): SHAP value.
+        cmap: Colormap.
+        norm: Normalization for colormap.
+        x (float): X position.
+        y (float): Y position.
+        max_x (float): Maximum X position.
+        line_height (float): Height of a line.
+
+    Returns:
+        tuple: Updated (x, y, token_line).
+    """
     if "<ENDNOTE> <STARTNOTE>" in token_line:
         parts = token_line.split("<ENDNOTE> <STARTNOTE>")
         for idx, part in enumerate(parts):
@@ -389,8 +480,19 @@ def _render_highlighted_text(
     ax, shap_values, text_tokens, norm, cmap, line_height=0.08, max_x=0.98
 ):
     """
-    Helper function to render highlighted text with color background.
-    Refactored to reduce branches and statements.
+    Render highlighted text with color background for SHAP values.
+
+    Args:
+        ax: Matplotlib axis.
+        shap_values (np.ndarray): SHAP values for each token.
+        text_tokens (list): List of text tokens.
+        norm: Normalization for colormap.
+        cmap: Colormap.
+        line_height (float): Height of a line.
+        max_x (float): Maximum X position.
+
+    Returns:
+        float: Final Y position after rendering.
     """
     x = 0.01
     y = 0.95
@@ -457,9 +559,14 @@ def plot_highlighted_text_with_colorbar(
         shap_values (np.ndarray): SHAP values for each token (1D array).
         text_tokens (list of str): List of text tokens (words or sentences).
         expected_value (float): Reference value for colorbar label.
+        mm_score (float): MM-SHAP dependence score for notes modality.
         figsize (tuple): Figure size.
         cmap (str): Matplotlib colormap.
         save_path (str): If provided, saves the plot to this path.
+        shap_range (tuple): Min/Max SHAP values for colorbar.
+
+    Returns:
+        None
     """
     norm = mpl.colors.Normalize(vmin=shap_range[0], vmax=shap_range[1])
     cmap = plt.get_cmap(cmap)

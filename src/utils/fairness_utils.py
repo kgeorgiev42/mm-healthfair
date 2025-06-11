@@ -24,14 +24,19 @@ def plot_bar_metric_frame(
     seed=0,
 ):
     """
-    Plot an error bar chart for the given metric frame.
+    Plot an error bar chart for the given metric frame using Fairlearn.
 
     Args:
-        metric_frame (MetricFrame): The metric frame to plot.
-        title (str): The title of the plot.
-        save_path (str): The path to save the plot.
-        figsize (tuple): The size of the figure.
-        fontsize (int): The font size for the plot.
+        metrics (dict): Dictionary of metric functions to compute.
+        y_test (np.ndarray): Ground truth labels.
+        y_hat (np.ndarray): Predicted labels.
+        attr_df (pl.DataFrame): Sensitive attribute DataFrame.
+        attribute (str): Name of the sensitive attribute.
+        save_path (str): Path to save the plot.
+        figsize (tuple, optional): Figure size.
+        nrows (int): Number of subplot rows.
+        ncols (int): Number of subplot columns.
+        seed (int): Random seed.
 
     Returns:
         None
@@ -68,13 +73,22 @@ def plot_bar_metric_frame(
 
     fig = plt.gcf()
     plt.tight_layout()
-    # plt.savefig(save_path)
     fig.savefig(save_path)
     print(f"Error plot saved to {save_path}.")
 
 
 # Extract bias-corrected confidence intervals using BCa method (example of effects and variations: https://www.erikdrysdale.com/bca_python/)
 def bias_corrected_ci(bootstrap_samples, observed_value):
+    """
+    Calculate bias-corrected and accelerated (BCa) confidence intervals for bootstrap samples.
+
+    Args:
+        bootstrap_samples (array-like): Bootstrap sample values.
+        observed_value (float): Observed value for bias correction.
+
+    Returns:
+        tuple: (lower_bound, upper_bound) confidence interval.
+    """
     sorted_samples = np.sort(bootstrap_samples)
     # Calculate z0 (bias correction factor)
     z0 = norm.ppf((np.sum(sorted_samples < observed_value) + 0.5) / len(sorted_samples))
@@ -108,6 +122,22 @@ def get_bootstrapped_fairness_measures(
     skip_ci: bool = False,
     verbose: bool = False,
 ) -> tuple:
+    """
+    Compute bootstrapped fairness measures (Demographic Parity, Equalized Odds, Equal Opportunity)
+    and their confidence intervals.
+
+    Args:
+        y_test (np.ndarray): Ground truth labels.
+        y_hat (np.ndarray): Predicted labels.
+        attr_pf (pl.DataFrame): Sensitive attribute DataFrame.
+        n_boot (int): Number of bootstrap samples.
+        seed (int): Random seed.
+        skip_ci (bool): If True, skip CI calculation.
+        verbose (bool): If True, print additional information.
+
+    Returns:
+        tuple: (dpr_full, eor_full, eop_full) where each contains (mean, lower_CI, upper_CI).
+    """
     global_metrics = {
         "Demographic Parity": demographic_parity_ratio,
         "Equalized Odds": equalized_odds_ratio,
@@ -182,13 +212,17 @@ def plot_fairness_by_age(
     measure_label: str = "Demographic Parity",
 ):
     """
-    Plot fairness measures by age group for sex, ethnicity, insurance, and marital status.
+    Plot fairness measures by age group for multiple sensitive attributes.
 
     Args:
         aq_dict (dict): Dictionary containing fairness metrics by age group.
         age_labels (list): List of age group labels.
         out_path (str): Path to save the plot.
-        figsize (tuple): Size of the figure.
+        attributes (list): List of sensitive attribute names.
+        attribute_labels (list): List of attribute display names.
+        figsize (tuple): Figure size.
+        measure (str): Key for the fairness measure to plot.
+        measure_label (str): Display label for the fairness measure.
 
     Returns:
         None
@@ -204,7 +238,6 @@ def plot_fairness_by_age(
     fig, axes = plt.subplots(2, 2, figsize=figsize, sharex=True, sharey=True)
     # Set suptitle
     fig.suptitle(f"{measure_label} by age and sensitive group.", fontsize=22)
-    # fig.supxlabel("Age Group", fontsize=20, x=0.55)
     fig.supylabel(measure_label, fontsize=20)
     axes = axes.flatten()
 
@@ -226,8 +259,6 @@ def plot_fairness_by_age(
             )
 
         axes[i].set_title(f"{label}", fontsize=20)
-        # axes[i].set_xlabel("Age Group")
-        # axes[i].set_ylabel(measure_label)
         axes[i].set_ylim(-0.05, 1)
         axes[i].grid(True)
         axes[i].yaxis.set_major_formatter(
@@ -265,6 +296,11 @@ def get_fairness_summary(
         res_all (dict): Dictionary containing fairness metrics for each model.
         models (list): List of model names.
         colors (list): List of colors for each model.
+        attribute_labels (list): List of attribute display names.
+        figsize (tuple): Figure size.
+        nrows (int): Number of subplot rows.
+        ncols (int): Number of subplot columns.
+        outcome (str): Name of the outcome.
         output_path (str): Path to save the plot.
 
     Returns:
@@ -275,7 +311,6 @@ def get_fairness_summary(
 
     # Define metrics and their labels
     metrics = ["DPR", "EQO", "EOP"]
-    # metric_labels = ["Demographic Parity", "Equalized Odds", "Equal Opportunity"]
 
     # Set default colors if not provided
     if not colors:

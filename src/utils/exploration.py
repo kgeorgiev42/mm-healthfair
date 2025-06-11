@@ -25,7 +25,22 @@ def get_table_one(
     verbose: bool = False,
 ) -> TableOne:
     """
-    Generate baseline patient summary with adjusted p-values grouped by outcome.
+    Generate a baseline patient summary table (Table 1) with adjusted p-values grouped by outcome.
+
+    Args:
+        ed_pts (pl.DataFrame | pl.LazyFrame): Patient data.
+        outcome (str): Outcome variable name.
+        outcome_label (str): Display name for the outcome.
+        output_path (str): Directory to save the HTML summary.
+        disp_dict_path (str): Path to JSON mapping feature names to display names.
+        sensitive_attr_list (list): List of sensitive attribute names.
+        nn_attr (list): List of non-normal columns.
+        adjust_method (str): Method for p-value adjustment.
+        cat_cols (list): List of categorical columns.
+        verbose (bool): If True, print summary information.
+
+    Returns:
+        TableOne: Generated TableOne summary object.
     """
     if isinstance(ed_pts, pl.LazyFrame):
         ed_pts = ed_pts.collect().to_pandas()
@@ -75,7 +90,17 @@ def assign_age_groups(
     use_lazy: bool = False,
 ) -> pl.DataFrame:
     """
-    Assign age groups to patients based on age column.
+    Assign age groups to patients based on age column and specified bins/labels.
+
+    Args:
+        ed_pts (pl.DataFrame | pl.LazyFrame): Patient data.
+        age_col (str): Name of the age column.
+        bins (list): List of bin edges for age groups.
+        labels (list): List of labels for age groups.
+        use_lazy (bool): If True, return a LazyFrame.
+
+    Returns:
+        pl.DataFrame: DataFrame with an added 'age_group' column.
     """
     if isinstance(ed_pts, pl.LazyFrame):
         ed_pts = ed_pts.collect()
@@ -101,7 +126,16 @@ def get_age_table_by_sensitive_attr(
     value_name_col: str,
 ) -> pl.DataFrame:
     """
-    Modifies the dataset into long format to group samples with the outcome by age.
+    Transform the dataset into long format to group samples with the outcome by age group and sensitive attribute.
+
+    Args:
+        ed_pts (pl.DataFrame | pl.LazyFrame): Patient data.
+        attr_name (str): Sensitive attribute column name.
+        outcome (str): Outcome variable name.
+        value_name_col (str): Name for the value column in the melted DataFrame.
+
+    Returns:
+        pd.DataFrame: Long-format DataFrame with counts and percentages by group.
     """
     if isinstance(ed_pts, pl.LazyFrame):
         ed_pts = ed_pts.collect()
@@ -147,7 +181,24 @@ def plot_outcome_dist_by_sensitive_attr(
     palette: list = None,
 ):
     """
-    Plots distribution of health outcomes by specified sensitive attribute.
+    Plot the distribution of health outcomes by a specified sensitive attribute.
+
+    Args:
+        ed_pts (pl.DataFrame | pl.LazyFrame): Patient data.
+        attr_col (str): Sensitive attribute column name.
+        attr_xlabel (str): Label for the sensitive attribute display label.
+        output_path (str): Directory to save the plot.
+        outcome_list (list): List of outcome variable names.
+        outcome_title (list): List of outcome display names.
+        outcome_legend (dict): Mapping of outcome titles to legend labels.
+        maxi (int): Number of rows in subplot grid.
+        maxj (int): Number of columns in subplot grid.
+        rot (int): Rotation angle for x-axis labels.
+        figsize (tuple): Figure size.
+        palette (list): List of colors for plotting.
+
+    Returns:
+        None
     """
     ### Edit when customising outcomes
     outcome_legend = {
@@ -217,7 +268,6 @@ def plot_outcome_dist_by_sensitive_attr(
     plt.tight_layout()
     plt.savefig(os.path.join(output_path, f"outcome_dist_by_{attr_col}.png"))
     print(f"Saved plot to outcome_dist_by_{attr_col}.png.")
-    # plt.show()
 
 
 def plot_age_dist_by_sensitive_attr(
@@ -235,7 +285,24 @@ def plot_age_dist_by_sensitive_attr(
     rot: int = 0,
 ):
     """
-    Plots distribution of age by specified sensitive attribute.
+    Plot the distribution of age groups by a specified sensitive attribute for patients with adverse events.
+
+    Args:
+        ed_pts (pl.DataFrame | pl.LazyFrame): Patient data.
+        attr_col (str): Sensitive attribute column name.
+        attr_xlabel (str): Label for the sensitive attribute display name.
+        output_path (str): Directory to save the plot.
+        outcome_list (list): List of outcome variable names.
+        outcome_title (list): List of outcome display names.
+        maxi (int): Number of rows in subplot grid.
+        maxj (int): Number of columns in subplot grid.
+        colors (list): List of colors for age groups.
+        labels (list): List of age group labels.
+        figsize (tuple): Figure size.
+        rot (int): Rotation angle for x-axis labels.
+
+    Returns:
+        None
     """
     ### Edit when customising outcomes
     colors = ["#fef0d9", "#fdcc8a", "#fc8d59", "#e34a33", "#b30000"]
@@ -315,7 +382,6 @@ def plot_age_dist_by_sensitive_attr(
 
     plt.savefig(os.path.join(output_path, f"age_dist_by_{attr_col}.png"))
     print(f"Saved plot to age_dist_by_{attr_col}.png.")
-    # plt.show()
 
 
 def plot_token_length_by_attribute(
@@ -336,8 +402,29 @@ def plot_token_length_by_attribute(
     adjust_method: str = "bonferroni",
     test_type: str = "t-test_welch",
 ):
-    """ "
-    Displays violin plots of aggregated BHC token length by sensitive attribute.
+    """
+    Display violin plots of aggregated BHC length by sensitive attribute, with statistical annotation.
+
+    Args:
+        ed_pts (pl.DataFrame | pl.LazyFrame): Patient data.
+        output_path (str): Directory to save the plot.
+        sensitive_attr_list (list): List of sensitive attribute names.
+        attr_title (list): List of attribute display names.
+        out_fname (str): Output filename for the plot.
+        maxi (int): Number of rows in subplot grid.
+        maxj (int): Number of columns in subplot grid.
+        figsize (tuple): Figure size.
+        rot (int): Rotation angle for x-axis labels.
+        ylim (tuple): Y-axis limits.
+        gr_pairs (dict): Dictionary of group pairs for statistical annotation.
+        suptitle (str): Figure title.
+        outcome_mode (bool): If True, relabel categories for outcome mode.
+        unique_value_order (list): Order of unique values for plotting.
+        adjust_method (str): Method for p-value adjustment.
+        test_type (str): Statistical test type.
+
+    Returns:
+        None
     """
     ### Edit when customising outcomes
     unique_value_order = ["N", "Y"]
@@ -447,4 +534,3 @@ def plot_token_length_by_attribute(
     tgt = os.path.join(output_path, out_fname)
     plt.savefig(tgt)
     print(f"Saved plot to {tgt}.")
-    # plt.show()

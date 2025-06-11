@@ -22,13 +22,16 @@ def load_pickle(filepath: str) -> Any:
 
 
 def save_pickle(target: dict, filepath: str, fname: str = "mm_feat.pkl") -> Any:
-    """Save a pickled object from a dictionary.
+    """
+    Save a Python object as a pickle file.
 
     Args:
-        filepath (str): Path to pickle (.pkl) file.
+        target (dict): Object to pickle.
+        filepath (str): Directory to save the pickle file.
+        fname (str): Filename for the pickle file (default: "mm_feat.pkl").
 
     Returns:
-        Any: Loaded object.
+        None
     """
     with open(os.path.join(filepath, fname), "wb") as f:
         pickle.dump(target, f)
@@ -40,16 +43,17 @@ def impute_from_df(
     use_col: str = None,
     key_col: str = None,
 ) -> pl.DataFrame | pl.LazyFrame:
-    """Imputes values from one dataframe to another.
+    """
+    Impute values from one dataframe to another using a key column.
 
     Args:
-        impute_to (pl.DataFrame | pl.LazyFrame): Table to impute values in to.
+        impute_to (pl.DataFrame | pl.LazyFrame): Table to impute values into.
         impute_from (pl.DataFrame): Table to impute values from.
-        use_col (str, optional): Column to containing values to impute. Defaults to None.
-        key_col (str, optional): Column to use to identify matching rows. Defaults to None.
+        use_col (str, optional): Column containing values to impute.
+        key_col (str, optional): Column to use to identify matching rows.
 
     Returns:
-        pl.DataFrame | pl.LazyFrame: _description_
+        pl.DataFrame | pl.LazyFrame: DataFrame with imputed values.
     """
     # create dictionary mapping values to identifier key
     dict_map = impute_from.select([key_col, use_col]).rows_by_key(
@@ -238,7 +242,24 @@ def get_train_split_summary(
     cat_cols: list = None,
     verbose: bool = True,
 ) -> None:
-    """Helper function to print statistical train-validation-test split summary."""
+    """
+    Print and save a statistical summary for the train, validation, and test splits.
+
+    Args:
+        train (pd.DataFrame): Training set DataFrame.
+        val (pd.DataFrame): Validation set DataFrame.
+        test (pd.DataFrame): Test set DataFrame.
+        outcome (str): Name of the outcome variable (default: "in_hosp_death").
+        output_path (str): Directory to save the summary HTML file.
+        cont_cols (list): List of continuous columns.
+        nn_cols (list): List of non-normal columns.
+        disp_dict (dict): Dictionary mapping original to display column names.
+        cat_cols (list): List of categorical columns.
+        verbose (bool): If True, print progress messages.
+
+    Returns:
+        None
+    """
     if verbose:
         print(f"Saving demographic summary for training split of outcome {outcome}.")
     samples = pd.concat([train, val, test], axis=0)
@@ -263,7 +284,15 @@ def get_train_split_summary(
 
 
 def rename_fields(col):
-    """Helper rename function for drug and specialty feature names."""
+    """
+    Helper function to rename drug and specialty feature names.
+
+    Args:
+        col (Any): Column name or tuple of column names.
+
+    Returns:
+        str: Joined string if input is a tuple, otherwise the original column name.
+    """
     if isinstance(col, tuple):
         col = "_".join(str(c) for c in col)
     return col

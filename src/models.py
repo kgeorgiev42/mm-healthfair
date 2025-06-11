@@ -12,6 +12,20 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 # nn.Modules
 class LSTM(nn.Module):
+    """
+    General-purpose LSTM module for sequence embeddings.
+
+    Args:
+        input_dim (int): Input feature dimension.
+        embed_dim (int): Output embedding dimension.
+        num_layers (int): Number of LSTM layers.
+        hidden_dim (int): Hidden state dimension.
+        dropout (float): Dropout rate.
+
+    Returns:
+        torch.Tensor: Embedded output.
+    """
+
     def __init__(self, input_dim, embed_dim, num_layers=1, hidden_dim=128, dropout=0):
         super().__init__()
         self.lstm = nn.LSTM(
@@ -28,7 +42,19 @@ class LSTM(nn.Module):
 
 
 class Gate(nn.Module):
-    # Adapted from https://github.com/emnlp-mimic/mimic/blob/main/base.py#L136 inspired by https://arxiv.org/pdf/1908.05787
+    """
+    Gated fusion module for combining multiple input embeddings.
+    Adapted from https://github.com/emnlp-mimic/mimic/blob/main/base.py#L136 inspired by https://arxiv.org/pdf/1908.05787.
+    Args:
+        inp1_size (int): Size of first input.
+        inp2_size (int): Size of second input.
+        inp3_size (int): Size of third input (optional).
+        dropout (float): Dropout rate.
+
+    Returns:
+        torch.Tensor: Fused output.
+    """
+
     def __init__(self, inp1_size, inp2_size, inp3_size: int = 0, dropout: int = 0):
         super().__init__()
 
@@ -58,6 +84,12 @@ class Gate(nn.Module):
 ### Adversarial debiasing component for main model using Gradient Reversal Layer
 ## Used to restrict the main model from learning sensitive attributes
 class GradientReversalFunction(torch.autograd.Function):
+    """
+    Gradient reversal layer for adversarial training.
+
+    Used to reverse gradients during backpropagation for adversarial debiasing.
+    """
+
     @staticmethod
     def forward(ctx, x, lambda_):
         ctx.lambda_ = lambda_
@@ -69,10 +101,47 @@ class GradientReversalFunction(torch.autograd.Function):
 
 
 def grad_reverse(x, lambda_=1.0):
+    """
+    Apply gradient reversal to the input tensor to enable maximisation of the adversarial objective function.
+
+    Args:
+        x (torch.Tensor): Input tensor.
+        lambda_ (float): Scaling factor for gradient reversal.
+
+    Returns:
+        torch.Tensor: Output tensor with reversed gradients.
+    """
     return GradientReversalFunction.apply(x, lambda_)
 
 
 class MMModel(L.LightningModule):
+    """
+    Multimodal model object for fusion of static, timeseries, and notes data.
+
+    Args:
+        st_input_dim (int): Static input dimension.
+        st_embed_dim (int): Static embedding dimension.
+        ts_input_dim (tuple): Tuple of timeseries input dimensions.
+        ts_embed_dim (int): Timeseries embedding dimension.
+        nt_input_dim (int): Notes input dimension.
+        nt_embed_dim (int): Notes embedding dimension.
+        num_layers (int): Number of LSTM layers.
+        dropout (float): Dropout rate.
+        num_ts (int): Number of timeseries modalities.
+        target_size (int): Output size.
+        lr (float): Learning rate.
+        fusion_method (str): Fusion method ("concat" or "mag").
+        st_first (bool): If True, static features are fused first.
+        modalities (list): List of modalities to use.
+        with_packed_sequences (bool): If True, use packed sequences for timeseries.
+        dataset (MIMIC4Dataset): Pass training dataset if using class weighting, else None.
+        sensitive_attr_ids (list): Indices of sensitive attribute features from static data for adversarial debiasing.
+        adv_lambda (float): Strength of adversarial penalty. No penalty is 0. Slight penalty is 0.1-0.2. Strong penalty is >=1.
+
+    Returns:
+        torch.Tensor: Model output.
+    """
+
     def __init__(
         self,
         st_input_dim=18,
@@ -200,6 +269,16 @@ class MMModel(L.LightningModule):
     def _init_adversarial_heads(
         self, st_embed_dim, ts_embed_dim, nt_embed_dim, num_ts, fusion_method
     ):
+        """
+        Initialize adversarial classifier heads for sensitive attributes.
+
+        Args:
+            st_embed_dim (int): Static embedding dimension.
+            ts_embed_dim (int): Timeseries embedding dimension.
+            nt_embed_dim (int): Notes embedding dimension.
+            num_ts (int): Number of timeseries modalities.
+            fusion_method (str): Fusion method.
+        """
         ### Adversarial classifier targeting sensitive attributes
         if self.sensitive_attr_ids:
             adv_in_dim = st_embed_dim if self.with_static else 0
@@ -228,6 +307,15 @@ class MMModel(L.LightningModule):
             self.adv_heads = None
 
     def prepare_batch(self, batch):
+        """
+        Prepare input batch for forward pass, handling all modalities.
+
+        Args:
+            batch: Input batch from DataLoader.
+
+        Returns:
+            tuple: Model output, labels, and optionally embeddings and static data for adversarial loss.
+        """
         ### Unpack batch based on the available modalities
         if self.st_only:
             s, y, d, lengths, n = batch[0], batch[1], None, None, None
@@ -281,6 +369,16 @@ class MMModel(L.LightningModule):
         )
 
     def training_step(self, batch, batch_idx):
+        """
+        Training step for one batch.
+
+        Args:
+            batch: Input batch.
+            batch_idx (int): Batch index.
+
+        Returns:
+            torch.Tensor: Training loss.
+        """
         # training_step defines the train loop.
         # it is independent of forward
         if self.adv_heads:
@@ -369,6 +467,16 @@ class MMModel(L.LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
+        """
+        Validation step for one batch.
+
+        Args:
+            batch: Input batch.
+            batch_idx (int): Batch index.
+
+        Returns:
+            None
+        """
         # Do not penalize adversarial loss in validation
         if self.adv_heads:
             x_hat, y, _, _ = self.prepare_batch(
@@ -389,6 +497,15 @@ class MMModel(L.LightningModule):
         self.log("val_ap", ap, prog_bar=True, batch_size=len(y))
 
     def predict_step(self, batch):
+        """
+        Prediction step for one batch.
+
+        Args:
+            batch: Input batch.
+
+        Returns:
+            tuple: (predictions, labels)
+        """
         if self.adv_heads:
             x_hat, y, _, _ = self.prepare_batch(batch)
         else:
@@ -397,6 +514,12 @@ class MMModel(L.LightningModule):
         return y_hat, y
 
     def configure_optimizers(self):
+        """
+        Configure optimizers and learning rate schedulers.
+
+        Returns:
+            tuple: (list of optimizers, list of schedulers)
+        """
         # optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr, weight_decay=1e-4)
         optimizer = torch.optim.SGD(self.parameters(), lr=self.lr, weight_decay=1e-4)
         # optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
@@ -435,10 +558,18 @@ class MMModel(L.LightningModule):
 
 
 class LitLSTM(L.LightningModule):
-    """LSTM using time-series data only.
+    """
+    LSTM model for time-series data only.
 
     Args:
-        L (_type_): _description_
+        ts_input_dim (int): Timeseries input dimension.
+        lstm_embed_dim (int): LSTM embedding dimension.
+        target_size (int): Output size.
+        lr (float): Learning rate.
+        with_packed_sequences (bool): If True, use packed sequences.
+
+    Returns:
+        torch.Tensor: Model output.
     """
 
     def __init__(
@@ -464,6 +595,15 @@ class LitLSTM(L.LightningModule):
         self.with_packed_sequences = with_packed_sequences
 
     def prepare_batch(self, batch):
+        """
+        Prepare input batch for LSTM model.
+
+        Args:
+            batch: Input batch from DataLoader.
+
+        Returns:
+            tuple: (predictions, labels)
+        """
         if self.with_packed_sequences:
             _, y, d, l = batch  # static, dynamic, lengths, labels  # noqa: E741
             d = torch.nn.utils.rnn.pack_padded_sequence(
@@ -487,6 +627,16 @@ class LitLSTM(L.LightningModule):
         return x_hat, y
 
     def training_step(self, batch, batch_idx):
+        """
+        Training step for one batch.
+
+        Args:
+            batch: Input batch.
+            batch_idx (int): Batch index.
+
+        Returns:
+            torch.Tensor: Training loss.
+        """
         # training_step defines the train loop.
         # it is independent of forward
         x_hat, y = self.prepare_batch(batch)
@@ -497,6 +647,16 @@ class LitLSTM(L.LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
+        """
+        Validation step for one batch.
+
+        Args:
+            batch: Input batch.
+            batch_idx (int): Batch index.
+
+        Returns:
+            torch.Tensor: Validation loss.
+        """
         x_hat, y = self.prepare_batch(batch)
         loss = self.criterion(x_hat, y)
         accuracy = self.acc(x_hat, y)
@@ -505,11 +665,21 @@ class LitLSTM(L.LightningModule):
         return loss
 
     def configure_optimizers(self):
+        """
+        Configure optimizer for LSTM model.
+
+        Returns:
+            torch.optim.Optimizer: Optimizer instance.
+        """
         optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
         return optimizer
 
 
 class SaveLossesCallback(Callback):
+    """
+    Learner callback to save train/validation losses to a CSV file.
+    """
+
     def __init__(self, log_dir="logs", save_every_n_epochs=5):
         """
         Callback to save train/validation losses to a CSV file every n epochs.
@@ -535,6 +705,9 @@ class SaveLossesCallback(Callback):
         Args:
             trainer: The PyTorch Lightning trainer instance.
             pl_module: The LightningModule being trained.
+
+        Returns:
+            None
         """
         # Save losses every n epochs
         if (trainer.current_epoch + 1) % self.save_every_n_epochs == 0:

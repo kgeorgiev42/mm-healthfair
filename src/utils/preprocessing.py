@@ -31,8 +31,22 @@ def preproc_icd_module(
     verbose=True,
     use_lazy: bool = False,
 ) -> pl.DataFrame:
-    """Takes an module dataset with ICD codes and puts it in long_format, optionally mapping ICD-codes by a mapping table path.
-    Uses custom ICD-10 mapping to generate fields for physical and mental long-term conditions."""
+    """
+    Process a diagnoses dataset with ICD codes, mapping ICD-9 to ICD-10 and generating features for long-term conditions.
+    Implementation is taken from the MIMIC-IV preprocessing pipeline provided by Gupta et al. (https://github.com/healthylaife/MIMIC-IV-Data-Pipeline/tree/main).
+
+    Args:
+        diagnoses (pl.DataFrame | pl.LazyFrame): Diagnoses data.
+        icd_map_path (str): Path to ICD-9 to ICD-10 mapping file.
+        map_code_colname (str): Column name for ICD code in mapping.
+        only_icd10 (bool): If True, only keep ICD-10 codes.
+        ltc_dict_path (str): Path to JSON with LTC code groups.
+        verbose (bool): If True, print summary statistics.
+        use_lazy (bool): If True, return a LazyFrame.
+
+    Returns:
+        pl.DataFrame or pl.LazyFrame: Processed diagnoses data.
+    """
 
     if isinstance(diagnoses, pl.LazyFrame):
         diagnoses = diagnoses.collect()
@@ -147,7 +161,21 @@ def get_ltc_features(
     verbose=True,
     use_lazy: bool = False,
 ) -> pl.DataFrame:
-    """Generates features for long-term conditions from a diagnoses table and a dictionary of ICD-10 codes."""
+    """
+    Generate features for long-term conditions and multimorbidity from ICD-10 diagnoses and custom LTC dictionary.
+
+    Args:
+        admits_last (pl.DataFrame | pl.LazyFrame): Admissions data.
+        diagnoses (pl.DataFrame | pl.LazyFrame): ICD-10 Diagnoses data.
+        ltc_dict_path (str): Path to JSON with LTC code groups.
+        mm_cutoff (int): Threshold for multimorbidity.
+        cmm_cutoff (int): Threshold for complex multimorbidity.
+        verbose (bool): If True, print summary statistics.
+        use_lazy (bool): If True, return a LazyFrame.
+
+    Returns:
+        pl.DataFrame or pl.LazyFrame: Admissions data with long-term condition count features.
+    """
 
     if isinstance(diagnoses, pl.LazyFrame):
         diagnoses = diagnoses.collect()
@@ -212,13 +240,14 @@ def get_ltc_features(
 
 
 def transform_sensitive_attributes(ed_pts: pl.DataFrame) -> pl.DataFrame:
-    """Maps any sensitive attributes to predefined categories and data types.
+    """
+    Map sensitive attributes (race, marital status) to predefined categories and types.
 
     Args:
-        ed_pts (pl.DataFrame): ED attendance patients.
+        ed_pts (pl.DataFrame): Patient data.
 
     Returns:
-        pl.DataFrame: Updated data.
+        pl.DataFrame: Updated patient data.
     """
 
     ed_pts = ed_pts.with_columns(
@@ -257,7 +286,18 @@ def prepare_medication_features(
     top_n: int = 50,
     use_lazy: bool = False,
 ) -> pl.DataFrame:
-    """Generates count features for drug-level medication history."""
+    """
+    Generate count and temporal (days since prescription) features for drug-level medication history.
+
+    Args:
+        medications (pl.DataFrame | pl.LazyFrame): Medication data.
+        admits_last (pl.DataFrame | pl.LazyFrame): Final hospitalisations data.
+        top_n (int): Number of top medications to include.
+        use_lazy (bool): If True, return a LazyFrame.
+
+    Returns:
+        pl.DataFrame or pl.LazyFrame: Admissions data with medication count features.
+    """
     if isinstance(medications, pl.LazyFrame):
         medications = medications.collect()
     if isinstance(admits_last, pl.LazyFrame):
@@ -379,7 +419,8 @@ def prepare_medication_features(
 
 
 def encode_categorical_features(ehr_data: pl.DataFrame) -> pl.DataFrame:
-    """Applies one-hot encoding to categorical features.
+    """
+    Apply one-hot encoding to categorical features in EHR data.
 
     Args:
         ehr_data (pl.DataFrame): Static EHR dataset.
@@ -421,13 +462,16 @@ def extract_lookup_fields(
     lookup_list: list = None,
     lookup_output_path: str = "../outputs/reference",
 ) -> pl.DataFrame:
-    """Extract dates and summary fields not suitable for training in a separate dataframe.
+    """
+    Extract date and summary fields not suitable for training into a separate DataFrame.
 
     Args:
         ehr_data (pl.DataFrame): Static EHR dataset.
+        lookup_list (list): List of columns to extract.
+        lookup_output_path (str): Directory to save lookup fields.
 
     Returns:
-        pl.DataFrame: Transformed EHR data.
+        pl.DataFrame: EHR data with lookup fields removed.
     """
     ehr_lookup = ehr_data.select(["subject_id"] + lookup_list)
     ehr_data = ehr_data.drop(lookup_list)
@@ -443,13 +487,18 @@ def remove_correlated_features(
     method: str = "pearson",
     verbose: bool = True,
 ) -> pl.DataFrame:
-    """Drop highly correlated features from static EHR dataset, while specifying features to explicitly save for training.
+    """
+    Drop highly correlated features from EHR data, keeping specified features.
 
     Args:
         ehr_data (pl.DataFrame): Static EHR dataset.
+        feats_to_save (list): Features to keep.
+        threshold (float): Correlation threshold.
+        method (str): Correlation method. Defaults to Pearson's R.
+        verbose (bool): If True, print summary.
 
     Returns:
-        pl.DataFrame: Transformed EHR data.
+        pl.DataFrame: EHR data with correlated features removed.
     """
     ### Specify features to save
     ehr_save = ehr_data.select(["subject_id"] + feats_to_save)
@@ -465,8 +514,6 @@ def remove_correlated_features(
             colname = item.columns
             val = abs(item.values)
             if val >= threshold:
-                # if verbose:
-                # print(f'Detected correlation: {colname.values[0]} || {row.values[0]} || {round(val[0][0], 2)}')
                 drop_cols.append(colname.values[0])
 
     to_drop = list(set(drop_cols))
@@ -501,13 +548,26 @@ def generate_train_val_test_set(
     stratify: bool = True,
     verbose: bool = True,
 ) -> dict:
-    """Create train/val/test split from static EHR dataset and save the patient IDs in separate files.
+    """
+    Create train/val/test split from static EHR data and save patient IDs across each split.
 
     Args:
         ehr_data (pl.DataFrame): Static EHR dataset.
+        output_path (str): Directory to save split IDs.
+        outcome_col (str): Outcome column name.
+        output_summary_path (str): Directory to save summary.
+        seed (int): Random seed.
+        train_ratio (float): Proportion for training set.
+        val_ratio (float): Proportion for validation set.
+        test_ratio (float): Proportion for test set.
+        cont_cols (list): Continuous columns.
+        nn_cols (list): Non-normal columns.
+        disp_dict (dict): Display name mapping.
+        stratify (bool): If True, stratify splits balancing the sets by outcome prevalence, gender and ethnicity.
+        verbose (bool): If True, print summary.
 
     Returns:
-        pl.DataFrame: Transformed EHR data.
+        dict: Dictionary with train, val, and test DataFrames.
     """
     ### Define display dictionary
     disp_dict = {
@@ -525,6 +585,7 @@ def generate_train_val_test_set(
     }
     cont_cols = ["Age"]
     ### List non-normally distributed columns here for re-scaling
+    ## TODO: Would need to move this to an appropriate config file
     nn_cols = [
         "total_n_presc",
         "n_unique_conditions",
@@ -683,7 +744,15 @@ def generate_train_val_test_set(
 
 
 def clean_notes(notes: pl.DataFrame | pl.LazyFrame) -> pl.DataFrame | pl.LazyFrame:
-    """Cleans notes data by removing any relevant special characters and extra whitespaces."""
+    """
+    Clean notes data by removing special characters and extra whitespaces.
+
+    Args:
+        notes (pl.DataFrame | pl.LazyFrame): Notes data.
+
+    Returns:
+        pl.DataFrame or pl.LazyFrame: Cleaned notes data.
+    """
     # Remove __ and any extra whitespaces
     notes = notes.with_columns(
         target=pl.col("target")
@@ -695,14 +764,17 @@ def clean_notes(notes: pl.DataFrame | pl.LazyFrame) -> pl.DataFrame | pl.LazyFra
 
 
 def process_text_to_embeddings(notes: pl.DataFrame) -> dict:
-    """Generates dictionary containing embeddings from Bio+Discharge ClinicalBERT (mean vector).
-    https://huggingface.co/emilyalsentzer/Bio_Discharge_Summary_BERT
+    """
+    Generate embeddings using the Bio+Discharge ClinicalBERT model pre-trained on MIMIC-III discharge summaries.
+    The current setup uses a SpaCy tokenizer mapped to a PyTorch object for GPU support.
+    Text length is limited to 128 tokens per clinical note, with included padding and truncation where appropriate.
+    The pre-trained model is provided by Alsentzer et al. (https://huggingface.co/emilyalsentzer/Bio_Discharge_Summary_BERT).
 
     Args:
-        notes (pl.DataFrame): Dataframe containing notes data.
+        notes (pl.DataFrame): DataFrame containing notes data.
 
     Returns:
-        dict: Dictionary containing subject_id as keys and average word embeddings as values.
+        dict: Mapping from subject_id to list of (sentence, embedding) pairs.
     """
     embeddings_dict = {}
 
@@ -766,13 +838,14 @@ def process_text_to_embeddings(notes: pl.DataFrame) -> dict:
 
 
 def clean_labevents(labs_data: pl.LazyFrame) -> pl.LazyFrame:
-    """Maps non-integer values to None and removes outliers.
+    """
+    Clean lab events by removing non-integer values and outliers.
 
     Args:
-        events (pl.DataFrame): Events table.
+        labs_data (pl.LazyFrame): Lab events data.
 
     Returns:
-        pl.DataFrame: Cleaned events table.
+        pl.LazyFrame: Cleaned lab events.
     """
     labs_data = labs_data.with_columns(
         pl.col("label")
@@ -814,12 +887,13 @@ def clean_labevents(labs_data: pl.LazyFrame) -> pl.LazyFrame:
 def add_time_elapsed_to_events(
     events: pl.DataFrame, starttime: pl.Datetime, remove_charttime: bool = False
 ) -> pl.DataFrame:
-    """Adds column 'elapsed' which considers time elapsed since starttime.
+    """
+    Add a column for time elapsed since a reference start time.
 
     Args:
         events (pl.DataFrame): Events table.
         starttime (pl.Datetime): Reference start time.
-        remove_charttime (bool, optional): Whether to remove charttime column. Defaults to False.
+        remove_charttime (bool): If True, remove charttime column.
 
     Returns:
         pl.DataFrame: Updated events table.
@@ -836,13 +910,14 @@ def add_time_elapsed_to_events(
 
 
 def convert_events_to_timeseries(events: pl.DataFrame) -> pl.DataFrame:
-    """Converts long-form events to wide-form time-series.
+    """
+    Convert long-form events to wide-form time-series.
 
     Args:
         events (pl.DataFrame): Long-form events.
 
     Returns:
-        pl.DataFrame: Wide-form time-series of shape (timestamp, features)
+        pl.DataFrame: Wide-form time-series.
     """
 
     metadata = (
@@ -888,7 +963,30 @@ def generate_interval_dataset(
     outcomes: list = None,
     verbose: bool = True,
 ) -> dict:
-    """Generates a multimodal dataset with set intervals for each event source."""
+    """
+    Generate a time-series dataset with set intervals for each event source (vital signs and lab measurements).
+
+    Args:
+        ehr_static (pl.DataFrame): Static EHR data.
+        ts_data (pl.DataFrame): Time-series data.
+        ehr_regtime (pl.DataFrame): Lookup dataframe for ED arrival times.
+        vitals_freq (str): Frequency for vitals resampling.
+        lab_freq (str): Frequency for labs resampling.
+        min_events (int): Include only patients with a minimum number of events.
+        max_events (int): Include only patients with a maximum number of events.
+        impute (str): Imputation method. Options are "value" (filling with -1), "forward" filling, "backward" filling or "mask" creating a string indicator for missingness.
+        include_dyn_mean (bool): If True, add dynamic mean features to static dataset.
+        no_resample (bool): If True, skip resampling.
+        standardize (bool): If True, standardize data using min-max scaling.
+        max_elapsed (int): Restrict collected measurements within the set hours from ED arrival.
+        vitals_lkup (list): List of vital sign features.
+        outcomes (list): List of outcome columns.
+        verbose (bool): If True, print summary.
+
+    Returns:
+        dict: Data dictionary and column dictionary.
+    """
+
     data_dict = {}
     col_dict = {}
     n = 0
@@ -978,6 +1076,18 @@ def generate_interval_dataset(
 def _prepare_feature_map_and_freq(
     ts_data: pl.DataFrame, vitals_freq: str = "5h", lab_freq: str = "1h"
 ) -> tuple[dict, dict]:
+    """
+    Prepare a mapping of feature names and frequency for each time-series source.
+
+    Args:
+        ts_data (pl.DataFrame): Time-series data containing a 'linksto' column.
+        vitals_freq (str): Frequency for vital signs.
+        lab_freq (str): Frequency for lab measurements.
+
+    Returns:
+        tuple: (feature_map, freq) where feature_map is a dict mapping data source to features,
+               and freq is a dict mapping data source to frequency string.
+    """
     feature_map: dict = {}
     freq: dict = {}
     for src in tqdm(ts_data.unique("linksto").get_column("linksto").to_list()):
@@ -1004,6 +1114,25 @@ def _process_patient_events(
     no_resample: bool = False,
     max_elapsed: int = None,
 ) -> tuple[bool, list[pl.DataFrame]]:
+    """
+    Process time-series events for a single patient, handling missing features, imputation, resampling, and filtering.
+
+    Args:
+        pt_events (pl.DataFrame): Patient's time-series events.
+        feature_map (dict): Mapping from source to feature names.
+        freq (dict): Mapping from source to frequency string.
+        ehr_static (pl.DataFrame): Static EHR data for the patient.
+        edregtime (pl.Datetime): Lookup dataframe for ED registration time.
+        min_events (int): Minimum number of measurements required.
+        max_events (int): Maximum number of measurements required.
+        impute (str): Imputation method. Options are "value" (filling with -1), "forward" filling, "backward" filling or "mask" creating a string indicator for missingness.
+        include_dyn_mean (bool): If True, add dynamic mean features.
+        no_resample (bool): If True, skip resampling.
+        max_elapsed (int): Restrict collected measurements within the set hours from ED arrival.
+
+    Returns:
+        tuple: (write_data, ts_data_list, skipped_due_to_event_count, skipped_due_to_elapsed_time)
+    """
     write_data = True
     ts_data_list = []
     skipped_due_to_event_count = False
@@ -1045,12 +1174,33 @@ def _process_patient_events(
 def _validate_event_count(
     timeseries: pl.DataFrame, min_events: int = 1, max_events: int = 1e6
 ) -> bool:
+    """
+    Check if the number of events in the timeseries is within the specified range.
+
+    Args:
+        timeseries (pl.DataFrame): Time-series data.
+        min_events (int): Minimum number of events.
+        max_events (int): Maximum number of events.
+
+    Returns:
+        bool: True if within range, False otherwise.
+    """
     return min_events <= timeseries.shape[0] <= max_events
 
 
 def _handle_missing_features(
     timeseries: pl.DataFrame, features: list[str] = None
 ) -> pl.DataFrame:
+    """
+    Add missing columns to the timeseries DataFrame as nulls.
+
+    Args:
+        timeseries (pl.DataFrame): Time-series data.
+        features (list): List of required feature names.
+
+    Returns:
+        pl.DataFrame: Time-series data with missing columns added as nulls.
+    """
     missing_cols = [x for x in features if x not in timeseries.columns]
     return timeseries.with_columns(
         [pl.lit(None, dtype=pl.Float64).alias(c) for c in missing_cols]
@@ -1060,6 +1210,17 @@ def _handle_missing_features(
 def _impute_missing_values(
     timeseries: pl.DataFrame, ehr_static: pl.DataFrame, impute: str = "value"
 ) -> tuple[pl.DataFrame, pl.DataFrame]:
+    """
+    Impute missing values in time-series and static EHR data.
+
+    Args:
+        timeseries (pl.DataFrame): Time-series data.
+        ehr_static (pl.DataFrame): Static EHR data.
+        impute (str): Imputation method ("mask", "forward", "backward", "value").
+
+    Returns:
+        tuple: (imputed_timeseries, imputed_ehr_static)
+    """
     if impute == "mask":
         timeseries = timeseries.with_columns(
             [pl.col(f).is_null().alias(f + "_isna") for f in timeseries.columns]
@@ -1079,6 +1240,16 @@ def _impute_missing_values(
 def _add_dynamic_mean(
     timeseries: pl.DataFrame, ehr_static: pl.DataFrame
 ) -> pl.DataFrame:
+    """
+    Add mean of dynamic features to the static EHR data.
+
+    Args:
+        timeseries (pl.DataFrame): Time-series data.
+        ehr_static (pl.DataFrame): Static EHR data.
+
+    Returns:
+        pl.DataFrame: Static EHR data with dynamic means appended.
+    """
     timeseries_mean = (
         timeseries.drop(["charttime", "linksto"]).mean().with_columns(pl.all().round(3))
     )
@@ -1086,11 +1257,12 @@ def _add_dynamic_mean(
 
 
 def _resample_timeseries(timeseries: pl.DataFrame, freq: str = "1h") -> pl.DataFrame:
-    """Resamples the time-series data to a specified frequency.
+    """
+    Resample the time-series data to a specified frequency.
 
     Args:
         timeseries (pl.DataFrame): The input time-series data.
-        freq (str, optional): The frequency for resampling. Defaults to "1h".
+        freq (str): The frequency for resampling (e.g., "1h").
 
     Returns:
         pl.DataFrame: The resampled time-series data.
@@ -1105,7 +1277,7 @@ def _resample_timeseries(timeseries: pl.DataFrame, freq: str = "1h") -> pl.DataF
 
 def _standardize_data(ts_data: pl.DataFrame) -> pl.DataFrame:
     """
-    Standardizes the 'value' column in the time-series data with minmax scaling.
+    Standardize the 'value' column in the time-series data using min-max scaling.
 
     Args:
         ts_data (pl.DataFrame): The input time-series data.
@@ -1113,15 +1285,11 @@ def _standardize_data(ts_data: pl.DataFrame) -> pl.DataFrame:
     Returns:
         pl.DataFrame: Standardized time-series data.
     """
-    # ts_vitals = ts_data.filter(pl.col("linksto") == "vitals_measurements")
     min_val = ts_data["value"].min()
     max_val = ts_data["value"].max()
     ts_data = ts_data.with_columns(
         ((pl.col("value") - min_val) / (max_val - min_val)).alias("value")
     )
-    # ts_data = ts_data.filter(pl.col("linksto") != "vitals_measurements")
-    ## Append the standardized vitals data
-    # ts_data = ts_data.vstack(ts_vitals)
 
     return ts_data
 
@@ -1132,6 +1300,18 @@ def _print_summary(
     missing_event_src: int = 0,
     filter_by_elapsed_time: int = 0,
 ) -> None:
+    """
+    Print a summary of the time-series interval generation process.
+
+    Args:
+        n (int): Number of successfully processed patients.
+        filter_by_nb_events (int): Number of patients skipped due to event count.
+        missing_event_src (int): Number of patients skipped due to missing sources.
+        filter_by_elapsed_time (int): Number of patients skipped due to elapsed time.
+
+    Returns:
+        None
+    """
     print(f"Successfully processed time-series intervals for {n} patients.")
     print(
         f"Skipping {filter_by_nb_events} patients with less or greater number of events than specified."
