@@ -11,7 +11,12 @@ nav:
         # - Data Curation: data_curation.md
     - Code Reference:
         - MIMIC-IV: mimiciv.md
+        - Data Exploration: exploration.md
         - Preprocessing: preprocessing.md
+        - Multimodal learning objects: mm_learn.md
+        - Multimodal evaluation: eval_utils.md
+        - Fairness: fairness_utils.md
+        - Explainability: shap_utils.md
         - Miscellaneous: functions.md
 
 theme:
