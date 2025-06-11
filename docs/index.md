@@ -12,7 +12,7 @@ The **MM-HealthFair** framework was developed to provide a clear evaluation of m
 - [Deep adversarial mitigation](https://arxiv.org/abs/1801.07593) for inserting multimodal fairness constraints.
 - Explainable AI ([SHAP](https://shap.readthedocs.io/en/latest/)) analytics for multimodal feature importance and aggregated measures for modality dependence ([MM-SHAP](https://github.com/Heidelberg-NLP/MM-SHAP/blob/main/)).
 
-For a detailed walkthrough of the framework, please refer to the [Getting Started](https://github.com/nhsengland/mm-healthfair/blob/main/docs/getting_started.md) page.
+For a detailed walkthrough of the framework, please refer to the [Getting Started](https://nhsengland.github.io/mm-healthfair/getting_started/) page.
 
 ![Concept Image](https://raw.githubusercontent.com/nhsengland/mm-healthfair/refs/heads/main/report/NHSE%20MMFair%20Concept.png)
 
