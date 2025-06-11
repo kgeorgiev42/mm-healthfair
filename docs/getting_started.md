@@ -98,6 +98,7 @@ usage: explore_data.py [-h] [--config CONFIG] --output_path OUTPUT_PATH
                        [--rot ROT] [--lazy] [--verbose]
                        ehr_path
 ```
+
 - `ehr_path`: [Required] Path to folder containing extracted data.
 - `--config`: Path to targets.toml file containing lookup fields for grouping.
 - `--output_path`: Directory where summary tables and plots should be written.
@@ -247,6 +248,7 @@ Usage:
                    [--strat_by_attr] [--group_models] [--verbose]
                    data_path
 ```
+
 - `data_path`: [Required] Path to the processed data .pkl file.
 - `--col_path`: Path to the pickled column dictionary generated from `prepare_data.py`.
 - `--ids_path`: Directory containing the test set ids.
@@ -291,6 +293,7 @@ Usage:
                    [--strat_by_attr] [--group_models] [--verbose]
                    data_path
 ```
+
 - `data_path`: [Required] Path to the processed data .pkl file.
 - `--fair_path` or `-f`: Directory to store fairness plots.
 - `--model_dir`: Directory containing the saved model metadata.
@@ -339,6 +342,7 @@ Usage:
                   [--local_risk_group LOCAL_RISK_GROUP] [--notes_offset_ref] [--verbose]
                   data_path
 ```
+
 - `data_path`: [Required] Path to the processed data .pkl file.
 - `col_path`: Path to the pickled column dictionary generated from `prepare_data.py`.
 - `--feat_names`: Path to a JSON file containing lookup names for each feature.
