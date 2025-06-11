@@ -34,6 +34,7 @@ In this project, we use an intermediate fusion approach to fuse the three data m
 ![MMLearning Concept](https://raw.githubusercontent.com/nhsengland/mm-healthfair/refs/heads/main/report/MMHealthFair%20Components.png)
 
 After training a multimodal algorithm, we can execute the evaluation pipeline for performance assessment. To run the pipeline we use:
+
 1. `train.py`: Script to train a deep neural net for risk prediction. Option to log and save models using [Weights & Biases](https://wandb.ai).
 2. `evaluate.py`: Run model inference including performance/calibration/loss summaries with confidence intervals, including risk stratification to set risk quantiles per patient in the test set.
 
