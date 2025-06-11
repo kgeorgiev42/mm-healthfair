@@ -27,7 +27,9 @@ _**Note:** Only public or fake data are shared in this repository._
 
 [![Python v3.10](https://img.shields.io/badge/Python-3.10-blue)](https://www.python.org/downloads/release/python-3100/)
 
-In the latest iteration, the framework was developed locally using [**Python** v3.10.11](https://www.python.org/downloads/release/python-31011/) and tested on a Windows 11 machine with GPU support (NVIDIA GeForce RTX 3080, 16 GiB VRAM). Additionally, model training and evaluation were performed on a Microsoft Azure machine using a Windows 10 Server with the following specifications: 1 x NVIDIA Tesla T4 GPU and 4 x vCPUs (28 GiB memory). 
+In the latest iteration, the framework was developed locally using [**Python** v3.10.11](https://www.python.org/downloads/release/python-31011/) and tested on a Windows 11 machine with GPU support (NVIDIA GeForce RTX 3080, 16 GiB VRAM). Additionally, model training and evaluation were performed on a Microsoft Azure machine using a Windows 10 Server with the following specifications: 
+- 1 x NVIDIA Tesla T4 GPU
+- 4 x vCPUs (28 GiB memory)
 
 ### Getting Started
 
