@@ -223,6 +223,3 @@ def plot_token_length_by_attribute(
 ```
 
 ---
-
-
-
