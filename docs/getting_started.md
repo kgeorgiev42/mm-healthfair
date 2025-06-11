@@ -41,7 +41,7 @@ poetry run python3 src/any_script.py [required args] --[optional args]
 
 ## Data Curation
 ### Downloading the data
-The MIMIC-IV dataset (v3.1) can be downloaded from [PhysioNet](https://physionet.org). 
+The MIMIC-IV dataset (v3.1) can be downloaded from [PhysioNet](https://physionet.org).
 
 Steps to download:
 
@@ -73,7 +73,7 @@ extract_data.py [-h] --output_path OUTPUT_PATH [--event_tables EVENT_TABLES [EVE
 - `--labitems`: Text file containing list of ITEMIDs to use from labevents.
 - `--icd9_to_icd10`: Text file containing ICD 9-10 mapping.
 - `--ltc_mapping`: JSON file containing mapping for long-term conditions in ICD-10 format.
-- `--verbose`: Control verbosity. If true, will make more .collect() calls to compute dataset size.   
+- `--verbose`: Control verbosity. If true, will make more .collect() calls to compute dataset size.
 - `--sample`: Extract randomized subset of patients for testing.
 - `--top_n_meds`: Number of drug-level features to extract (if using add-on EHR data).
 - `--lazy`: Whether to use lazy mode for reading in data. Defaults to False (except for event tables - always uses lazymode).
@@ -94,7 +94,7 @@ Usage:
 ```sh
 usage: explore_data.py [-h] [--config CONFIG] --output_path OUTPUT_PATH
                        [--display_dict_path DISPLAY_DICT_PATH] [--bhc_fname BHC_FNAME]
-                       [--pval_adjust PVAL_ADJUST] [--pval_test PVAL_TEST] [--max_i MAX_I] [--max_j MAX_J]     
+                       [--pval_adjust PVAL_ADJUST] [--pval_test PVAL_TEST] [--max_i MAX_I] [--max_j MAX_J]
                        [--rot ROT] [--lazy] [--verbose]
                        ehr_path
 ```
@@ -113,7 +113,7 @@ usage: explore_data.py [-h] [--config CONFIG] --output_path OUTPUT_PATH
 Example:
 
 ```sh
-poetry run python explore_data.py ../outputs/ext_data/ -c ../config/targets.toml -o ../outputs/exp_data --lazy -v -r 35 
+poetry run python explore_data.py ../outputs/ext_data/ -c ../config/targets.toml -o ../outputs/exp_data --lazy -v -r 35
 ```
 
 This will read the extracted MIMIC-IV files from `../outputs/ext_data/` and the outcome/attribute configurations `../config/targets.toml` and generate the following tables and plots:
@@ -121,7 +121,7 @@ This will read the extracted MIMIC-IV files from `../outputs/ext_data/` and the 
 - Barcharts highlighting outcome prevalence.
 - Age group distributions by each sensitive attribute.
 - Violin plots of the log-transformed **Brief Hospital Course** lengths with statistical testing.
-  
+
 ### Data Preprocessing
 Once these core files have been extracted, we run `prepare_data.py` to create a multimodal feature dictionary for model training and evaluation. The time-series and text modalities can optionally be left out of the dictionary. This will execute a sequence of preprocessing strategies for each data modality in the following order:
 
@@ -146,12 +146,12 @@ Once these core files have been extracted, we run `prepare_data.py` to create a 
 
 Usage:
 ```sh
-prepare_data.py [-h] [--output_dir OUTPUT_DIR] [--output_summary_dir OUTPUT_SUMMARY_DIR]                
+prepare_data.py [-h] [--output_dir OUTPUT_DIR] [--output_summary_dir OUTPUT_SUMMARY_DIR]
                        [--output_reference_dir OUTPUT_REFERENCE_DIR] [--pkl_fname PKL_FNAME]
                        [--col_fname COL_FNAME] [--config CONFIG] [--corr_threshold CORR_THRESHOLD]
                        [--corr_method CORR_METHOD] [--min_events MIN_EVENTS] [--max_events MAX_EVENTS]
                        [--impute IMPUTE] [--no_resample] [--include_dyn_mean] [--standardize]
-                       [--max_elapsed MAX_ELAPSED] [--include_notes] [--train_ratio TRAIN_RATIO] [--stratify]  
+                       [--max_elapsed MAX_ELAPSED] [--include_notes] [--train_ratio TRAIN_RATIO] [--stratify]
                        [--seed SEED] [--verbose]
                        data_dir
 ```
@@ -184,7 +184,7 @@ Example:
 poetry run python prepare_data.py ../outputs/ext_data -o ../outputs/prep_data --train_ratio 0.8 --min_events 2 --impute value --max_elapsed 72 --stratify --include_notes -v
 ```
 
-This will initiate the complete multimodal feature extraction across the three modalities. The target data split will retain 80% of unique patients for training, 10% for validation and 10% for testing, stratified by the target outcome. The patient set will be further restricted to having at least 2 measurements across lab and vital measurements, collected within 72 hours of ED arrival. Data imputation will simply replace the missing time-series measurements with '-1'. The text pipeline will use SpaCy to automatically download the [BioBERT](https://huggingface.co/emilyalsentzer/Bio_Discharge_Summary_BERT) pre-trained discharge summary embeddings and execute a PyTorch embedding pipeline to tokenize the data inputs. It's worth noting that this process may take several hours, if running on a local machine. 
+This will initiate the complete multimodal feature extraction across the three modalities. The target data split will retain 80% of unique patients for training, 10% for validation and 10% for testing, stratified by the target outcome. The patient set will be further restricted to having at least 2 measurements across lab and vital measurements, collected within 72 hours of ED arrival. Data imputation will simply replace the missing time-series measurements with '-1'. The text pipeline will use SpaCy to automatically download the [BioBERT](https://huggingface.co/emilyalsentzer/Bio_Discharge_Summary_BERT) pre-trained discharge summary embeddings and execute a PyTorch embedding pipeline to tokenize the data inputs. It's worth noting that this process may take several hours, if running on a local machine.
 
 The final dictionary will be exported to the specified folder under `../outputs/prep_data/<--pkl_fname>.pkl`, where each primary key will be a unique patient, and each data modality and target outcome set will be separate sub-keys within each patient sample. The column names for each field will be stored in a separate dictionary with the same data structure in `../outputs/prep_data/<--col_fname>.pkl`. The training/val/test ids will be stored in separate `.csv` files inside `--output_dir`.
 
@@ -242,7 +242,7 @@ Once you have trained and saved a model you can run inference on the hold-out te
 
 Usage:
 ```sh
- evaluate.py [-h] [--col_path COL_PATH] [--ids_path IDS_PATH] [--attr_path ATTR_PATH]                    
+ evaluate.py [-h] [--col_path COL_PATH] [--ids_path IDS_PATH] [--attr_path ATTR_PATH]
                    [--eval_path EVAL_PATH] [--outcome OUTCOME] [--model_dir MODEL_DIR]
                    [--model_path MODEL_PATH] [--config CONFIG] [--targets TARGETS] [--n_bins N_BINS]
                    [--strat_by_attr] [--group_models] [--verbose]
@@ -287,7 +287,7 @@ In similar fashion, we can run `fairness.py` to evaluate a multimodal algorithm 
 
 Usage:
 ```sh
- evaluate.py [-h] [--col_path COL_PATH] [--ids_path IDS_PATH] [--attr_path ATTR_PATH]                    
+ evaluate.py [-h] [--col_path COL_PATH] [--ids_path IDS_PATH] [--attr_path ATTR_PATH]
                    [--eval_path EVAL_PATH] [--outcome OUTCOME] [--model_dir MODEL_DIR]
                    [--model_path MODEL_PATH] [--config CONFIG] [--targets TARGETS] [--n_bins N_BINS]
                    [--strat_by_attr] [--group_models] [--verbose]
@@ -326,7 +326,7 @@ This runs fairness inference on a list of multimodal algorithms, with each model
 
 ### Explainability Analysis
 
-Finally, we can run `explain.py` to measure feature importance and understand the decision boundaries of a multimodal algorithm. Currently the script only supports interpreting a fully-fused model across all three data modalities (IF-EHR+TS+NT). It uses the [SHAP](https://shap.readthedocs.io/en/latest/) library for post-model global and local feature importance estimation and borrows ideas from the [MM-SHAP](https://github.com/Heidelberg-NLP/MM-SHAP/tree/main) library for aggregating SHAP values across modalities. 
+Finally, we can run `explain.py` to measure feature importance and understand the decision boundaries of a multimodal algorithm. Currently the script only supports interpreting a fully-fused model across all three data modalities (IF-EHR+TS+NT). It uses the [SHAP](https://shap.readthedocs.io/en/latest/) library for post-model global and local feature importance estimation and borrows ideas from the [MM-SHAP](https://github.com/Heidelberg-NLP/MM-SHAP/tree/main) library for aggregating SHAP values across modalities.
 
 Upon its first run, the script will create a model wrapper using the **DeepSHAP** algorithm to backpropagate across the multimodal framework and estimate the Shapley values across each deep neural net component. Similar to the previous scripts, it will again save a `.pkl` dictionary file containing the batch-wise Shapley values, mapped by each patient ID in the testing set, and split across each data modality. The time-series modality will include two independent value sets for the vital signs and the lab testing measurements. This process may take ~30 minutes on a local machine. After storing the SHAP values, the dictionary containing the attribution scores will be pre-loaded automatically in future runs. The next step of the script will depend on the selected mode:
 
@@ -348,7 +348,7 @@ Usage:
 - `--feat_names`: Path to a JSON file containing lookup names for each feature.
 - `--ids_path`: Directory containing test set ids.
 - `--exp_path` or `-x`: Directory to store explanation plots.
-- `--eval_path` or `-e`: Evaluation path for obtaining risk dictionary as .pkl file.     
+- `--eval_path` or `-e`: Evaluation path for obtaining risk dictionary as .pkl file.
 - `--attr_path`: Directory containing attributes metadata (original `ehr_static.csv`).
 - `--outcome` or `-o`: Binary outcome to use for multimodal learning (one of the labels in `targets.toml`). Defaults to prediction of in-hospital death.
 - `--model_dir`: Directory containing the saved model metadata.
