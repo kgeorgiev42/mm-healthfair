@@ -27,9 +27,9 @@ Configurations regarding the target objective, the sensitive attributes and any 
 
 ## Multimodal learning and validation
 In this project, we use an intermediate fusion approach to fuse the three data modalities using concatenation with equal weight. Each modality is trained on a separate deep neural net component and fused at the final hidden layer. The currently supported network components are:
-- **EHR (MLP)**: Multi-layer Perceptron classifier for tabular data.
-- **TS (LSTM)**: 2-component LSTM classifier (for vital signs and lab measurements data).
-- **NT (TF-E)**: Transformer-encoder network for free-text (discharge summaries) data.
+- **MM-EHR (MLP)**: Multi-layer Perceptron classifier for tabular data.
+- **MM-TS (LSTM)**: 2-component LSTM classifier (for vital signs and lab measurements data).
+- **MM-NT (TF-E)**: Transformer-encoder network for free-text (discharge summaries) data.
 
 ![MMLearning Concept](https://raw.githubusercontent.com/nhsengland/mm-healthfair/refs/heads/main/report/MMHealthFair%20Components.png)
 
