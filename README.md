@@ -19,7 +19,7 @@ _**Note:** Only public or fake data are shared in this repository._
 ### Project Stucture
 
 - The main code is found in the root of the repository (see Usage below for more information)
-- A summary of the key functionalities of the project is available on the [index](./docs/index.md) page.
+- A summary of the key functionalities of the project is available on the [index](https://nhsengland.github.io/mm-healthfair/) page.
 - The report from the previous project iteration [report](./report/) is also available in the `reports` folder
 - More information about the code usage can be found in the [model card](./model_card.md)
 
@@ -61,7 +61,7 @@ _Note:_ To enable support for platforms with CPU-only compute units, you should 
 ### Usage
 This repository contains code used to generate an evaluate multimodal deep learning pipelines for risk prediction using demographic, time-series and clinical notes data from [MIMIC-IV v3.1](https://physionet.org/content/mimiciv/3.1/). Additionally, it includes functionalities for adversarial mitigation (controlling model dependence on sensitive attributes), fairness analysis with bootstrapping and explainability using [SHAP](https://shap.readthedocs.io/en/latest/) and [MM-SHAP](https://github.com/Heidelberg-NLP/MM-SHAP/) scores for examining multimodal feature importance.
 
-To reproduce the experiments, refer to the [Getting Started](./docs/getting_started.md) page for a detailed walkthrough.
+To reproduce the experiments, refer to the [Getting Started](https://nhsengland.github.io/mm-healthfair/getting_started/) page for a detailed walkthrough.
 
 
 #### Outputs
