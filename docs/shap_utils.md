@@ -294,3 +294,4 @@ def plot_highlighted_text_with_colorbar(
     """
 ```
 
+---
