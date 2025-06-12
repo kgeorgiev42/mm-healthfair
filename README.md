@@ -10,7 +10,7 @@
 [![Poetry](https://img.shields.io/endpoint?url=https://python-poetry.org/badge/v0.json)](https://python-poetry.org/)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000)](https://github.com/psf/black)
 
-This repository holds code for the Understanding Fairness and Explainability in Multimodal Approaches within Healthcare project (MM-HealthFair). The MM-HealthFair framework was designed to support flexible classification pipelines, providing an end-to-end
+This repository holds code for the Understanding Fairness and Explainability in Multimodal Approaches within Healthcare project (MM-HealthFair). The MM-HealthFair framework was designed to support analysis of biases induced from routine healthcare data in risk prediction algorithms, providing an end-to-end
 pipeline for multimodal fusion, evaluation and fairness investigation.
 See the [original project proposal](https://nhsx.github.io/nhsx-internship-projects/advances-modalities-explainability/) for more information.
 
