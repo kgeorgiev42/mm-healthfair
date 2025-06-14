@@ -20,7 +20,7 @@ _**Note:** Only public or fake data are shared in this repository._
 
 - The main code is found in the root of the repository (see Usage below for more information)
 - A summary of the key functionalities of the project is available on the [index](https://nhsengland.github.io/mm-healthfair/) page.
-- The reports from the last two project iterations [report](./report/) are also available in the `reports` folder.
+- Details on the last two project iterations are also available in the [reports](./report/) folder.
 - More information about the code usage can be found in the [model card](./model_card.md).
 
 ### Built With
