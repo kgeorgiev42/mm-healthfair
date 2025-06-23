@@ -16,12 +16,12 @@ See the [original project proposal](https://nhsx.github.io/nhsx-internship-proje
 
 _**Note:** Only public or fake data are shared in this repository._
 
-### Project Stucture
+### Project Structure
 
-- The main code is found in the root of the repository (see Usage below for more information)
+- The main code is found in the root of the repository (see Usage below for more information).
 - A summary of the key functionalities of the project is available on the [index](https://nhsengland.github.io/mm-healthfair/) page.
-- The report from the previous project iteration [report](./report/) is also available in the `reports` folder
-- More information about the code usage can be found in the [model card](./model_card.md)
+- Details on the last two project iterations are also available in the [reports](./report/) folder.
+- More information about the code usage can be found in the [model card](./model_card.md).
 
 ### Built With
 
@@ -35,7 +35,7 @@ In the latest iteration, the framework was developed locally using [**Python** v
 
 #### Installation
 
-To get a local copy up and running follow these simple steps.
+To get a local copy up and running, follow these simple steps.
 
 To clone the repo:
 
@@ -59,7 +59,7 @@ _Note:_ There are known issues when installing the scispacy package for Python v
 _Note:_ To enable support for platforms with CPU-only compute units, you should remove the `source="pytorch-gpu"` arguments from `pyproject.toml` before installing the PyTorch libraries.
 
 ### Usage
-This repository contains code used to generate an evaluate multimodal deep learning pipelines for risk prediction using demographic, time-series and clinical notes data from [MIMIC-IV v3.1](https://physionet.org/content/mimiciv/3.1/). Additionally, it includes functionalities for adversarial mitigation (controlling model dependence on sensitive attributes), fairness analysis with bootstrapping and explainability using [SHAP](https://shap.readthedocs.io/en/latest/) and [MM-SHAP](https://github.com/Heidelberg-NLP/MM-SHAP/) scores for examining multimodal feature importance.
+This repository contains code used to generate and evaluate multimodal deep learning pipelines for risk prediction using demographic, time-series and clinical notes data from [MIMIC-IV v3.1](https://physionet.org/content/mimiciv/3.1/). Additionally, it includes functionalities for adversarial mitigation (controlling model dependence on sensitive attributes), fairness analysis with bootstrapping and explainability using [SHAP](https://shap.readthedocs.io/en/latest/) and [MM-SHAP](https://github.com/Heidelberg-NLP/MM-SHAP/) scores for examining multimodal feature importance.
 
 To reproduce the experiments, refer to the [Getting Started](https://nhsengland.github.io/mm-healthfair/getting_started/) page for a detailed walkthrough.
 
@@ -90,7 +90,7 @@ Contributions are what make the open source community such an amazing place to l
 
 1. Fork the Project
 2. Create your Feature Branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your Changes (`git commit -m 'Add some AmazingFeature'`)
+3. Commit your Changes (`git commit -m 'Add some AmazingFeature
 4. Push to the Branch (`git push origin feature/AmazingFeature`)
 5. Open a Pull Request
 
