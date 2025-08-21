@@ -476,6 +476,9 @@ def extract_lookup_fields(
     ehr_lookup = ehr_data.select(["subject_id"] + lookup_list)
     ehr_data = ehr_data.drop(lookup_list)
     print(f"Saving lookup fields in EHR data to {lookup_output_path}")
+    ## Create folder if it does not exist
+    if not os.path.exists(lookup_output_path):
+        os.makedirs(lookup_output_path)
     ehr_lookup.write_csv(os.path.join(lookup_output_path, "ehr_lookup.csv"))
     return ehr_data
 
@@ -869,7 +872,7 @@ def clean_labevents(labs_data: pl.LazyFrame) -> pl.LazyFrame:
     )
     labs_data = labs_data.drop_nulls()
 
-    # Remove outliers using 2 std from mean
+    # Remove outliers using 5 std from mean
     lab_events = lab_events.with_columns(
         mean=pl.col("value").mean().over(pl.count("label"))
     )
@@ -877,12 +880,81 @@ def clean_labevents(labs_data: pl.LazyFrame) -> pl.LazyFrame:
         std=pl.col("value").std().over(pl.count("label"))
     )
     lab_events = lab_events.filter(
-        (pl.col("value") < pl.col("mean") + pl.col("std") * 2)
-        & (pl.col("value") > pl.col("mean") - pl.col("std") * 2)
+        (pl.col("value") <= pl.col("mean") + pl.col("std") * 5)
+        & (pl.col("value") >= pl.col("mean") - pl.col("std") * 5)
     ).drop(["mean", "std"])
 
     return lab_events
 
+def clean_vitals(vitals_data: pl.LazyFrame) -> pl.LazyFrame:
+    """
+    Clean extracted vital signs measurements, clipping them to plausible ranges and converting Celsius to Fahrenheit where appropriate.
+
+    Args:
+        vitals_data (pl.LazyFrame): Vital signs data.
+
+    Returns:
+        pl.LazyFrame: Cleaned vital signs data.
+    """
+
+    # Range definitions
+    celc_conversion = 9 / 5 + 32
+    celc_range = (25, 45)  # Plausible Celsius range for temperature
+    fahr_range = (85, 110)  # Plausible Fahrenheit range for temperature
+    sys_bp_range = (70, 220)  # Plausible range for systolic blood pressure
+    dias_bp_range = (40, 130)  # Plausible range for diastolic blood pressure
+    heart_rate_range = (30, 220)  # Plausible range for heart rate
+    oxygen_saturation_range = (70, 100)  # Plausible range for oxygen saturation
+    respiratory_rate_range = (5, 60)  # Plausible range for respiratory rate
+
+    # Convert 'Temperature' values in Celsius to Fahrenheit (if in plausible Celsius range)
+    vitals_cleaned = vitals_data.with_columns(
+        pl.when((pl.col("label") == "Temperature") & (pl.col("value") < celc_range[1]) & (pl.col("value") > celc_range[0]))
+        .then(pl.col("value") * celc_conversion)
+        .otherwise(pl.col("value"))
+        .alias("value")
+    )
+    # Clip Systolic blood pressure values to [70, 220]
+    vitals_cleaned = vitals_cleaned.with_columns(
+        pl.when(pl.col("label") == "Systolic blood pressure")
+        .then(pl.col("value").clip(sys_bp_range[0], sys_bp_range[1]))
+        .otherwise(pl.col("value"))
+        .alias("value")
+    )
+    # Clip Diastolic blood pressure values to [40, 130]
+    vitals_cleaned = vitals_cleaned.with_columns(
+        pl.when(pl.col("label") == "Diastolic blood pressure")
+        .then(pl.col("value").clip(dias_bp_range[0], dias_bp_range[1]))
+        .otherwise(pl.col("value"))
+        .alias("value")
+    )
+    # Clip Heart rate values to [30, 220]
+    vitals_cleaned = vitals_cleaned.with_columns(
+        pl.when(pl.col("label") == "Heart rate")
+        .then(pl.col("value").clip(heart_rate_range[0], heart_rate_range[1]))
+        .otherwise(pl.col("value"))
+        .alias("value")
+    )
+    # Clip Oxygen saturation values to [70, 100]
+    vitals_cleaned = vitals_cleaned.with_columns(
+        pl.when(pl.col("label") == "Oxygen saturation")
+        .then(pl.col("value").clip(oxygen_saturation_range[0], oxygen_saturation_range[1]))
+        .otherwise(pl.col("value"))
+        .alias("value")
+    )
+    # Clip Respiratory rate values to [5, 60]
+    vitals_cleaned = vitals_cleaned.with_columns(
+        pl.when(pl.col("label") == "Respiratory rate")
+        .then(pl.col("value").clip(respiratory_rate_range[0], respiratory_rate_range[1]))
+        .otherwise(pl.col("value"))
+        .alias("value")
+    )
+    # Drop invalid measurements for temperature only
+    vitals_cleaned = vitals_cleaned.filter(
+        (pl.col("label") != "Temperature") |
+        ((pl.col("value") >= fahr_range[0]) & (pl.col("value") <= fahr_range[1]))
+    )
+    return vitals_cleaned
 
 def add_time_elapsed_to_events(
     events: pl.DataFrame, starttime: pl.Datetime, remove_charttime: bool = False
@@ -1268,11 +1340,16 @@ def _resample_timeseries(timeseries: pl.DataFrame, freq: str = "1h") -> pl.DataF
         pl.DataFrame: The resampled time-series data.
     """
     timeseries = timeseries.upsample(time_column="charttime", every="1m")
-    return (
-        timeseries.group_by_dynamic("charttime", every=freq)
-        .agg(pl.col(pl.Float64).mean())
-        .fill_null(strategy="forward")
-    )
+    # Exclude -1 values before aggregation
+    timeseries = timeseries.with_columns([
+        pl.when(pl.col(col) == -1).then(None).otherwise(pl.col(col)).alias(col)
+        for col in timeseries.columns if timeseries.schema[col] == pl.Float64
+    ])
+    # Forward fill null values
+    timeseries = timeseries.group_by_dynamic("charttime", every=freq).agg(pl.col(pl.Float64).mean()).fill_null(strategy="forward")
+    # Replace remaining null values with -1
+    timeseries = timeseries.fill_null(value=-1)
+    return timeseries
 
 
 def _standardize_data(ts_data: pl.DataFrame) -> pl.DataFrame:

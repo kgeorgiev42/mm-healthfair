@@ -13,7 +13,7 @@ from utils.functions import (
     get_final_episodes,
     get_n_unique_values,
 )
-from utils.preprocessing import get_ltc_features, preproc_icd_module
+from utils.preprocessing import get_ltc_features, preproc_icd_module, clean_vitals
 
 warnings.filterwarnings("ignore", category=pl.exceptions.MapWithoutReturnDtypeWarning)
 
@@ -35,7 +35,6 @@ if __name__ == "__main__":
     parser.add_argument(
         "--include_addon_ehr_data", "-a", default=False, action="store_true"
     )
-
     parser.add_argument(
         "--labitems",
         "-i",
@@ -198,6 +197,10 @@ if __name__ == "__main__":
         )
         print("Merging OMR, ED and Lab test measurements..")
         events = m4c.merge_events_table(ed_vitals, labs, omr, use_lazy=args.lazy)
+        print(
+            "Cleaning vitals signs measurements..."
+        )
+        events = clean_vitals(events)
         print(
             "Filtering population with ED attendance, discharge summary and measurements history.."
         )

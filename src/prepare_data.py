@@ -1,5 +1,6 @@
 import argparse
 import glob
+import json
 import os
 import sys
 
@@ -61,6 +62,13 @@ parser.add_argument(
     help="Name of pickle file to save column lookup dictionary.",
 )
 parser.add_argument(
+    "--display_dict_path",
+    "-d",
+    type=str,
+    help="Path to dictionary for display names of features.",
+    default="../config/feat_name_map.json",
+)
+parser.add_argument(
     "--config",
     "-c",
     type=str,
@@ -104,6 +112,7 @@ parser.add_argument(
 parser.add_argument(
     "--standardize",
     action="store_true",
+    default=False,
     help="Flag for whether to standardize timeseries data with minmax scaling (in the range [0,1]).",
 )
 parser.add_argument(
@@ -212,6 +221,7 @@ print("---------------------------------")
 # collect events
 events = events.collect(streaming=True)
 # get all features expected for each event data source and set sampling freq
+#print(events.filter(pl.col("label") == "Temperature").select("value").describe())
 print(f"Imputing missing values using strategy: {args.impute}")
 feature_dict, col_dict = generate_interval_dataset(
     ehr_proc,
@@ -301,6 +311,12 @@ for p_id in tqdm(feature_dict.keys()):
     )
     feature_dict[p_id]["static"] = feature_dict[p_id]["static"].reshape(1, -1)
 
+### Load dictionary containing display names for features
+if os.path.exists(args.display_dict_path):
+    with open(args.display_dict_path) as f:
+        disp_dict = json.load(f)
+    ### Map dynamic1_cols to values in disp_dict
+    col_dict["dynamic1_cols"] = [disp_dict.get(key, key) for key in col_dict["dynamic1_cols"]]
 print("---------------------------------")
 print("Finished train/val/test split creation.")
 print("---------------------------------")

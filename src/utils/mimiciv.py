@@ -680,7 +680,7 @@ def read_vitals_table(
 def read_labevents_table(
     mimic4_path: str,
     admits_last: pl.DataFrame | pl.LazyFrame,
-    include_items: str = "../config/lab_items.csv",
+    include_items: str = "None",
 ) -> pl.LazyFrame:
     """
     Read and preprocess the labevents table from MIMIC-IV.
@@ -728,12 +728,17 @@ def read_labevents_table(
         (pl.col("charttime") <= pl.col("prev_dischtime"))
         & (pl.col("charttime") >= pl.col("prev_edregtime"))
     ).drop(["prev_edregtime", "prev_dischtime"])
-    # get most common items (sample file contains top 50 itemids)
+    # get most common items (top 50 itemids by label)
+    if include_items is None:
+        lab_items = labs_data.groupby("itemid").agg(pl.count().alias("count")).sort("count", descending=True).head(50)
+        ### Export items to file
+        #lab_items.collect().write_csv("../config/lab_items.csv")
     if include_items is not None:
         # read txt file containing list of ids
         with open(include_items) as f:
             lab_items = list(f.read().splitlines())
-        labs_data = labs_data.filter(
+
+    labs_data = labs_data.filter(
             pl.col("itemid").cast(pl.Utf8).is_in(set(lab_items))
         )
 

@@ -4,6 +4,7 @@ import sys
 
 import polars as pl
 import toml
+from utils.functions import load_pickle
 import utils.exploration as m4exp
 
 if __name__ == "__main__":
@@ -30,11 +31,25 @@ if __name__ == "__main__":
         required=True,
     )
     parser.add_argument(
+        "--labitems",
+        "-l",
+        type=str,
+        help="Text file containing list of ITEMIDs to use from labevents.",
+        default="../config/lab_items.txt",
+    )
+    parser.add_argument(
         "--display_dict_path",
         "-d",
         type=str,
         help="Path to dictionary for display names of features.",
         default="../config/feat_name_map.json",
+    )
+    parser.add_argument(
+        "--feat_dict_path",
+        "-f",
+        type=str,
+        help="Path to multimodal feature dictionary for summarising only patients in training data.",
+        default="../outputs/prep_data/mmfair_feat.pkl",
     )
     parser.add_argument(
         "--bhc_fname",
@@ -78,6 +93,17 @@ if __name__ == "__main__":
         default=0,
     )
     parser.add_argument(
+        "--n_labitems",
+        type=int,
+        help="# most common lab tests to report. Defaults to 50.",
+        default=50,
+    )
+    parser.add_argument(
+        "--training_subset",
+        action="store_true",
+        help="Whether to use the training subset of the MIMIC-IV data (pre-loaded from available multimodal dictionary).",
+    )
+    parser.add_argument(
         "--lazy",
         action="store_true",
         help="Whether to use lazy mode for reading in data. Defaults to False.",
@@ -90,8 +116,12 @@ if __name__ == "__main__":
         sys.exit(1)
 
     ed_pts = pl.read_csv(os.path.join(args.ehr_path, "ehr_static.csv"))
+    ed_ts_measures = pl.read_csv(
+        os.path.join(args.ehr_path, "events_ts.csv")
+    )
     if args.lazy:
         ed_pts = ed_pts.lazy()
+        ed_ts_measures = ed_ts_measures.lazy()
 
     if not os.path.exists(args.output_path):
         print(f"Creating output directory for data exploration at {args.output_path}")
@@ -103,12 +133,43 @@ if __name__ == "__main__":
     attributes = config["attributes"]["labels"]
     attribute_labels = config["attributes"]["display"]
     nn_attr = config["attributes"]["nonnormal"]
+    n_attr = config["attributes"]["normal"]
     categorical = config["attributes"]["categorical"]
     age_bins = config["age"]["bins"]
     age_labels = config["age"]["labels"]
 
     if len(categorical) == 0:
         categorical = None
+
+    if os.path.exists(args.feat_dict_path) and args.training_subset:
+        print(
+            "Using training subset of MIMIC-IV data from multimodal feature dictionary."
+        )
+        pt_dict = load_pickle(args.feat_dict_path)
+        ed_pts = ed_pts.filter(
+            pl.col("subject_id").is_in(list(pt_dict.keys()))
+        )
+
+    if os.path.exists(args.labitems):
+        with open(args.labitems) as f:
+            lab_items = list(f.read().splitlines())
+        lab_items = [int(x) for x in lab_items if x.isdigit()]
+        lab_items = lab_items[:args.n_labitems]
+
+    ### Filter ED time-series measurements to display
+    ed_ts_measures = ed_ts_measures.filter(
+        (pl.col("itemid").is_in(lab_items) | (pl.col("linksto") == "vitals_measurements"))
+    )
+    ### Get median values per patient for each item and merge with static data.
+    ed_ts_measures = m4exp.get_median_values_per_patient(ed_ts_measures)
+    if isinstance(ed_pts, pl.LazyFrame):
+        ed_pts = ed_pts.collect()
+
+    ed_pts = ed_pts.join(
+        ed_ts_measures,
+        on="subject_id",
+        how="left"
+    )
 
     print(
         "Generating summary tables and plots across all defined outcomes and attributes."
@@ -126,6 +187,7 @@ if __name__ == "__main__":
             args.display_dict_path,
             sensitive_attr_list=attribute_labels,
             nn_attr=nn_attr,
+            n_attr=n_attr,
             verbose=args.verbose,
             adjust_method=args.pval_adjust,
             cat_cols=categorical,

@@ -20,6 +20,7 @@ def get_table_one(
     disp_dict_path: str = "../outputs/reference/feat_name_map.json",
     sensitive_attr_list: list = "None",
     nn_attr: list = "None",
+    n_attr: list = "None",
     adjust_method="bonferroni",
     cat_cols: list = None,
     verbose: bool = False,
@@ -35,6 +36,7 @@ def get_table_one(
         disp_dict_path (str): Path to JSON mapping feature names to display names.
         sensitive_attr_list (list): List of sensitive attribute names.
         nn_attr (list): List of non-normal columns.
+        n_attr (list): List of normal columns.
         adjust_method (str): Method for p-value adjustment.
         cat_cols (list): List of categorical columns.
         verbose (bool): If True, print summary information.
@@ -51,9 +53,11 @@ def get_table_one(
         disp_dict = json.load(f)
     ### Infer categorical data if not specified
     if cat_cols is None:
-        cat_cols = [el for el in disp_dict.values() if el not in nn_attr]
+        cat_cols = [el for el in disp_dict.values() if el not in nn_attr and el not in n_attr]
+
     ed_disp = ed_pts.rename(columns=disp_dict)
     ed_disp = ed_disp[disp_dict.values()]
+    #print(ed_disp.columns)
     ### Code categorical columns
     for col in cat_cols:
         if col not in sensitive_attr_list:
@@ -63,18 +67,48 @@ def get_table_one(
         print(
             f"Generating table summary by {outcome_label} with prevalence {(ed_disp[outcome_label].value_counts(normalize=True).iloc[1]*100).round(2)}%"
         )
-    tb_one_hd = TableOne(
-        ed_disp,
-        categorical=[col for col in cat_cols if outcome_label != col],
-        nonnormal=nn_attr,
-        groupby=outcome_label,
-        overall=True,
-        pval=True,
-        htest_name=True,
-        tukey_test=True,
-        decimals=0,
-        pval_adjust=adjust_method,
-    )
+
+        # Set decimals for specific variables
+        decimals_dict = {
+            'Systolic Blood Pressure': 2,
+            'Diastolic Blood Pressure': 2,
+            'Potassium': 2,
+            'Creatinine': 2,
+            'Urea Nitrogen': 2,
+            'RDW': 2,
+            'MCH': 2,
+            'MCHC': 2,
+            'Anion Gap': 2,
+            'Bicarbonate': 2,
+            'Phosphate': 2,
+            'White Blood Cells': 2,
+            'Red Blood Cells': 2,
+            'MCV': 2,
+            'Sodium': 2,
+            'Platelet Count': 2,
+            'Calcium Total': 2,
+            'Hemoglobin': 2,
+            'Hematocrit': 2,
+            'Magnesium': 2,
+            'Chloride': 2,
+            'PTT': 2,
+            'Temperature': 2,
+            'Respiratory Rate': 2,
+        }
+        # Set decimals=2 for specified variables, 0 for the rest
+        decimals = {col: decimals_dict.get(col, 0) for col in ed_disp.columns}
+        tb_one_hd = TableOne(
+            ed_disp,
+            categorical=[col for col in cat_cols if outcome_label != col],
+            nonnormal=nn_attr,
+            groupby=outcome_label,
+            overall=True,
+            pval=True,
+            htest_name=True,
+            tukey_test=True,
+            decimals=decimals,
+            pval_adjust=adjust_method,
+        )
     tb_one_hd.to_html(os.path.join(output_path, f"table_one_{outcome}.html"))
     print(
         f"Saved table summary grouped by {outcome_label} to table_one_{outcome}.html."
@@ -534,3 +568,24 @@ def plot_token_length_by_attribute(
     tgt = os.path.join(output_path, out_fname)
     plt.savefig(tgt)
     print(f"Saved plot to {tgt}.")
+
+
+def get_median_values_per_patient(ed_ts_measures: pl.DataFrame | pl.LazyFrame) -> pl.DataFrame:
+    """
+    Extract the median value per patient for each measurement label from a long-format time-series dataframe.
+
+    Args:
+        ed_ts_measures (pl.DataFrame | pl.LazyFrame): Time-series measurements in long format with 'subject_id', 'label', and 'value'.
+
+    Returns:
+        pl.DataFrame: DataFrame with columns ['subject_id', 'label', 'median_value'].
+    """
+    if isinstance(ed_ts_measures, pl.LazyFrame):
+        ed_ts_measures = ed_ts_measures.collect()
+    median_df = ed_ts_measures.groupby(["subject_id", "label"]).agg(
+        pl.col("value").median().alias("median_value")
+    )
+    ### Pivot table by value
+    median_df = median_df.pivot(index="subject_id", columns="label", values="median_value")
+
+    return median_df.lazy() if isinstance(ed_ts_measures, pl.LazyFrame) else median_df
